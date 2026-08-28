@@ -5,7 +5,8 @@ import {
   SignerRefreshRequired,
   SkipPaymentCycle,
 } from "./errors.js";
-import type { HeadersMap } from "./types.js";
+import { stripTrailingSlashes } from "./strings.js";
+import type { HeadersMap, HttpHeaderBag } from "./types.js";
 
 const USER_AGENT = "pymthouse-gateway-web/0.1.0";
 const REFRESH_SESSION_ORCHESTRATOR_URL_HEADER = "Livepeer-Orchestrator-URL";
@@ -58,7 +59,7 @@ export function joinEndpoint(baseUrl: string, suffix: string): string {
   const parsed = parseHttpUrl(baseUrl);
   parsed.hash = "";
   const suffixPath = suffix.startsWith("/") ? suffix : `/${suffix}`;
-  const basePath = parsed.pathname.replace(/\/+$/, "");
+  const basePath = stripTrailingSlashes(parsed.pathname);
   parsed.pathname = `${basePath}${suffixPath}`;
   return parsed.toString();
 }
@@ -86,10 +87,7 @@ export function extractErrorMessageFromBody(body: string): string {
   return truncate(body);
 }
 
-function headerValue(
-  headers: Record<string, string | string[] | undefined>,
-  name: string,
-): string | null {
+function headerValue(headers: HttpHeaderBag, name: string): string | null {
   const needle = name.toLowerCase();
   for (const [key, value] of Object.entries(headers)) {
     if (key.toLowerCase() !== needle) continue;
@@ -103,7 +101,7 @@ export function raiseHttpJsonError(
   status: number,
   url: string,
   body = "",
-  headers: Record<string, string | string[] | undefined> = {},
+  headers: HttpHeaderBag = {},
 ): never {
   const message = extractErrorMessageFromBody(body);
   const bodyPart = message ? `; body=${JSON.stringify(message)}` : "";
@@ -147,19 +145,51 @@ function jsonRequestParts(options: HttpRequestOptions): {
   return { method, headers, body };
 }
 
+async function readResponseBody(body: AsyncIterable<Buffer | string>): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of body) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
+function rethrowHttpFailure(e: unknown, url: string): never {
+  if (
+    e instanceof SignerRefreshRequired ||
+    e instanceof SkipPaymentCycle ||
+    e instanceof LivepeerGatewayError
+  ) {
+    throw e;
+  }
+  const msg = e instanceof Error ? e.message : String(e);
+  const name = e instanceof Error ? e.name : "Error";
+  if (name === "AbortError" || name === "TimeoutError" || msg.includes("timeout")) {
+    throw new LivepeerGatewayError(
+      `HTTP JSON error: failed to reach endpoint: timeout (url=${url})`,
+    );
+  }
+  if (msg.includes("ECONNREFUSED")) {
+    throw new LivepeerGatewayError(
+      `HTTP JSON error: connection refused (is the server running? is the host/port correct?) (url=${url})`,
+    );
+  }
+  throw new LivepeerGatewayError(`HTTP JSON error: unexpected error: ${name}: ${msg} (url=${url})`);
+}
+
 export async function requestBody(
   url: string,
   options: HttpRequestOptions = {},
 ): Promise<{
   body: Buffer;
   contentType: string;
-  headers: Record<string, string | string[] | undefined>;
+  headers: HttpHeaderBag;
 }> {
   const timeoutMs = options.timeoutMs ?? 5_000;
   const { method, headers, body } = jsonRequestParts(options);
   const parsed = parseHttpUrl(url);
+  const requestUrl = parsed.toString();
   try {
-    const res = await request(parsed.toString(), {
+    const res = await request(requestUrl, {
       method,
       headers,
       body,
@@ -168,49 +198,20 @@ export async function requestBody(
       headersTimeout: timeoutMs,
       bodyTimeout: timeoutMs,
     });
-    const chunks: Buffer[] = [];
-    for await (const chunk of res.body) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-    const raw = Buffer.concat(chunks);
+    const raw = await readResponseBody(res.body);
     const contentType =
       typeof res.headers["content-type"] === "string" ? res.headers["content-type"] : "";
+    const responseHeaders = res.headers as HttpHeaderBag;
     if (res.statusCode >= 400) {
-      raiseHttpJsonError(
-        res.statusCode,
-        parsed.toString(),
-        raw.toString("utf8"),
-        res.headers as Record<string, string | string[] | undefined>,
-      );
+      raiseHttpJsonError(res.statusCode, requestUrl, raw.toString("utf8"), responseHeaders);
     }
     return {
       body: raw,
       contentType,
-      headers: res.headers as Record<string, string | string[] | undefined>,
+      headers: responseHeaders,
     };
   } catch (e) {
-    if (
-      e instanceof SignerRefreshRequired ||
-      e instanceof SkipPaymentCycle ||
-      e instanceof LivepeerGatewayError
-    ) {
-      throw e;
-    }
-    const msg = e instanceof Error ? e.message : String(e);
-    const name = e instanceof Error ? e.name : "Error";
-    if (name === "AbortError" || name === "TimeoutError" || msg.includes("timeout")) {
-      throw new LivepeerGatewayError(
-        `HTTP JSON error: failed to reach endpoint: timeout (url=${parsed.toString()})`,
-      );
-    }
-    if (msg.includes("ECONNREFUSED")) {
-      throw new LivepeerGatewayError(
-        `HTTP JSON error: connection refused (is the server running? is the host/port correct?) (url=${parsed.toString()})`,
-      );
-    }
-    throw new LivepeerGatewayError(
-      `HTTP JSON error: unexpected error: ${name}: ${msg} (url=${parsed.toString()})`,
-    );
+    rethrowHttpFailure(e, requestUrl);
   }
 }
 

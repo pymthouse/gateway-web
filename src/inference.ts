@@ -61,7 +61,7 @@ export interface InferenceResult {
 }
 
 function buildPayload(req: InferenceRequest): Record<string, unknown> {
-  const payload: Record<string, unknown> = { ...(req.params ?? {}) };
+  const payload: Record<string, unknown> = { ...req.params };
   const cap = req.capability.toLowerCase();
   const isTts = ["tts", "chatterbox", "lux-tts", "speech"].some((k) => cap.includes(k));
   if (req.prompt && !("text" in payload) && !("prompt" in payload)) {
@@ -86,8 +86,7 @@ function buildInferenceResult(options: {
   data: Record<string, unknown>;
   t0: number;
 }): InferenceResult {
-  const url =
-    extractMediaUrl(options.data) ?? extractMediaUrl({ data: options.data });
+  const url = extractMediaUrl(options.data) ?? extractMediaUrl({ data: options.data });
   const kind = capabilityMediaKind(options.req.capability);
   return {
     url,
@@ -160,7 +159,7 @@ export function createGateway(config: GatewayConfig): Gateway {
         if (runners.length === 0) {
           throw new NoRunnerAvailableError(`no LR single-shot runner for app ${app} in discovery`);
         }
-      orchCache.set(cacheKey, runners);
+        orchCache.set(cacheKey, runners);
       }
 
       const payload = buildPayload(req);

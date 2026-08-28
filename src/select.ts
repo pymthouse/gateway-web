@@ -1,3 +1,5 @@
+import { randomInt } from "node:crypto";
+import { stripTrailingSlashes } from "./strings.js";
 import type { DiscoveryEntry, LiveRunnerInstance, LiveRunnerPriceInfo } from "./types.js";
 
 export type MeritRank = (capName: string, orchAddrs: string[]) => string[];
@@ -57,7 +59,7 @@ function isSingleShot(mode: string): boolean {
 }
 
 function lastAppSegment(app: string): string {
-  const trimmed = app.replace(/\/+$/, "");
+  const trimmed = stripTrailingSlashes(app);
   const slash = trimmed.lastIndexOf("/");
   return slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
 }
@@ -88,7 +90,7 @@ export function resolveApp(
   capability: string,
   override?: string,
 ): string | null {
-  if (override && override.trim()) return override.trim();
+  if (override?.trim()) return override.trim();
   const cap = capability.trim();
   if (!cap) return null;
   for (const inst of instances) {
@@ -98,7 +100,7 @@ export function resolveApp(
 }
 
 export function endpointFor(app: string, endpoint?: string): string {
-  if (endpoint && endpoint.trim()) {
+  if (endpoint?.trim()) {
     const ep = endpoint.trim();
     return ep.startsWith("/") ? ep : `/${ep}`;
   }
@@ -118,7 +120,7 @@ export function endpointFor(app: string, endpoint?: string): string {
 }
 
 export function normalizeAppBase(base: string): string {
-  const trimmed = base.replace(/\/+$/, "");
+  const trimmed = stripTrailingSlashes(base);
   if (trimmed.endsWith("/session")) {
     return `${trimmed.slice(0, -"/session".length)}/app`;
   }
@@ -129,13 +131,11 @@ export function normalizeAppBase(base: string): string {
 }
 
 function defaultChoose<T>(items: T[]): T {
-  return items[Math.floor(Math.random() * items.length)] as T;
+  if (items.length === 0) return items[0] as T;
+  return items[randomInt(items.length)] as T;
 }
 
-function admitOrchestrator(
-  addr: string,
-  admitted: readonly string[] | null | undefined,
-): boolean {
+function admitOrchestrator(addr: string, admitted: readonly string[] | null | undefined): boolean {
   if (!admitted || admitted.length === 0) return true;
   return admitted.some((a) => Boolean(a) && addr.includes(a));
 }
@@ -160,11 +160,7 @@ export function appFamilyPrefix(app: string): string {
   return slash > 0 ? app.slice(0, slash) : "";
 }
 
-const MODALITY_FAMILIES = new Set([
-  "image-generation",
-  "video-generation",
-  "audio-generation",
-]);
+const MODALITY_FAMILIES = new Set(["image-generation", "video-generation", "audio-generation"]);
 
 function orderOrchestratorUrls(
   orchUrls: string[],
@@ -190,6 +186,53 @@ function orderOrchestratorUrls(
   }
 }
 
+function uniqueByUrl(instances: LiveRunnerInstance[]): LiveRunnerInstance[] {
+  const byUrl = new Map<string, LiveRunnerInstance>();
+  for (const inst of instances) {
+    if (!byUrl.has(inst.url)) byUrl.set(inst.url, inst);
+  }
+  return [...byUrl.values()];
+}
+
+function groupByOrchestrator(instances: LiveRunnerInstance[]): Map<string, LiveRunnerInstance[]> {
+  const byOrch = new Map<string, LiveRunnerInstance[]>();
+  for (const inst of instances) {
+    const key = inst.orchestratorUrl || inst.url;
+    const bucket = byOrch.get(key);
+    if (bucket) bucket.push(inst);
+    else byOrch.set(key, [inst]);
+  }
+  return byOrch;
+}
+
+function takeUntilLimit(
+  source: Iterable<LiveRunnerInstance>,
+  picked: LiveRunnerInstance[],
+  usedUrls: Set<string>,
+  limit: number,
+): void {
+  for (const inst of source) {
+    if (picked.length >= limit) return;
+    if (usedUrls.has(inst.url)) continue;
+    picked.push(inst);
+    usedUrls.add(inst.url);
+  }
+}
+
+function pickOnePerOrchestrator(
+  orchOrder: string[],
+  byOrch: Map<string, LiveRunnerInstance[]>,
+  choose: <T>(items: T[]) => T,
+): LiveRunnerInstance[] {
+  const picked: LiveRunnerInstance[] = [];
+  for (const orch of orchOrder) {
+    const bucket = byOrch.get(orch);
+    if (!bucket?.length) continue;
+    picked.push(bucket.length === 1 ? bucket[0]! : choose(bucket));
+  }
+  return picked;
+}
+
 /**
  * Up to `max` single-shot runners for `appId`.
  *
@@ -208,45 +251,33 @@ export function pickRunners(
   const pairs = singleShotCandidates(entries, appId, options.admitted);
   if (pairs.length === 0) return [];
 
-  const byUrl = new Map<string, LiveRunnerInstance>();
-  for (const inst of pairs) {
-    if (!byUrl.has(inst.url)) byUrl.set(inst.url, inst);
-  }
-  const unique = [...byUrl.values()];
-
-  const byOrch = new Map<string, LiveRunnerInstance[]>();
-  for (const inst of unique) {
-    const key = inst.orchestratorUrl || inst.url;
-    const bucket = byOrch.get(key);
-    if (bucket) bucket.push(inst);
-    else byOrch.set(key, [inst]);
-  }
-
-  const orchOrder = orderOrchestratorUrls(
-    [...byOrch.keys()],
-    options.capName,
-    options.meritRank,
-  );
-
+  const unique = uniqueByUrl(pairs);
+  const byOrch = groupByOrchestrator(unique);
+  const orchOrder = orderOrchestratorUrls([...byOrch.keys()], options.capName, options.meritRank);
   const picked: LiveRunnerInstance[] = [];
   const usedUrls = new Set<string>();
-  for (const orch of orchOrder) {
-    if (picked.length >= limit) break;
-    const bucket = byOrch.get(orch);
-    if (!bucket?.length) continue;
-    const inst = bucket.length === 1 ? bucket[0]! : choose(bucket);
-    picked.push(inst);
-    usedUrls.add(inst.url);
-  }
-
-  for (const inst of unique) {
-    if (picked.length >= limit) break;
-    if (usedUrls.has(inst.url)) continue;
-    picked.push(inst);
-    usedUrls.add(inst.url);
-  }
-
+  takeUntilLimit(pickOnePerOrchestrator(orchOrder, byOrch, choose), picked, usedUrls, limit);
+  takeUntilLimit(unique, picked, usedUrls, limit);
   return picked;
+}
+
+function isFamilyFailoverCandidate(
+  inst: LiveRunnerInstance,
+  appId: string,
+  family: string,
+  usedUrls: Set<string>,
+  usedOrchs: Set<string>,
+  admitted: readonly string[] | null | undefined,
+): boolean {
+  return (
+    inst.app !== appId &&
+    inst.app.startsWith(`${family}/`) &&
+    isSingleShot(inst.mode) &&
+    Boolean(inst.url) &&
+    admitOrchestrator(inst.orchestratorUrl, admitted) &&
+    !usedUrls.has(inst.url) &&
+    !(inst.orchestratorUrl && usedOrchs.has(inst.orchestratorUrl))
+  );
 }
 
 /**
@@ -269,20 +300,15 @@ export function pickInferencePool(
   const usedUrls = new Set(exact.map((r) => r.url));
   const usedOrchs = new Set(exact.map((r) => r.orchestratorUrl).filter(Boolean));
   const extras: LiveRunnerInstance[] = [];
-
   for (const inst of instancesFromDiscovery(entries)) {
     if (extras.length + exact.length >= limit) break;
-    if (inst.app === appId) continue;
-    if (!inst.app.startsWith(`${family}/`)) continue;
-    if (!isSingleShot(inst.mode) || !inst.url) continue;
-    if (!admitOrchestrator(inst.orchestratorUrl, options.admitted)) continue;
-    if (usedUrls.has(inst.url)) continue;
-    if (inst.orchestratorUrl && usedOrchs.has(inst.orchestratorUrl)) continue;
+    if (!isFamilyFailoverCandidate(inst, appId, family, usedUrls, usedOrchs, options.admitted)) {
+      continue;
+    }
     extras.push(inst);
     usedUrls.add(inst.url);
     if (inst.orchestratorUrl) usedOrchs.add(inst.orchestratorUrl);
   }
-
   return [...exact, ...extras];
 }
 

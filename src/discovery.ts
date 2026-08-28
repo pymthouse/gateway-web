@@ -56,6 +56,25 @@ function runnerMatchesFilters(
   return true;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function collectMatchingRunners(
+  runners: unknown[],
+  appFilters: string[],
+  gpuFilters: string[],
+): Array<Record<string, unknown>> {
+  const matched: Array<Record<string, unknown>> = [];
+  for (const runner of runners) {
+    const rec = asRecord(runner);
+    if (!rec || !validRunner(rec) || !runnerMatchesFilters(rec, appFilters, gpuFilters)) continue;
+    matched.push(rec);
+  }
+  return matched;
+}
+
 function filterRunnerDiscoveryEntries(
   data: unknown[],
   appFilters: string[],
@@ -63,22 +82,12 @@ function filterRunnerDiscoveryEntries(
 ): DiscoveryEntry[] {
   const entries: DiscoveryEntry[] = [];
   for (const item of data) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-    const rec = item as Record<string, unknown>;
-    const runners = rec.runners;
-    if (!Array.isArray(runners)) continue;
-    const matched: Array<Record<string, unknown>> = [];
-    for (const runner of runners) {
-      if (!runner || typeof runner !== "object" || Array.isArray(runner)) continue;
-      const r = runner as Record<string, unknown>;
-      if (!validRunner(r)) continue;
-      if (!runnerMatchesFilters(r, appFilters, gpuFilters)) continue;
-      matched.push(r);
-    }
-    if (matched.length > 0) {
-      const address = typeof rec.address === "string" ? rec.address : "";
-      entries.push({ ...rec, address, runners: matched });
-    }
+    const rec = asRecord(item);
+    if (!rec || !Array.isArray(rec.runners)) continue;
+    const matched = collectMatchingRunners(rec.runners, appFilters, gpuFilters);
+    if (matched.length === 0) continue;
+    const address = typeof rec.address === "string" ? rec.address : "";
+    entries.push({ ...rec, address, runners: matched });
   }
   return entries;
 }

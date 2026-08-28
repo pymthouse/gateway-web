@@ -39,3 +39,6 @@ export interface SignerMaterial {
 }
 
 export type HeadersMap = Record<string, string>;
+
+/** Incoming HTTP header bag from undici (`string` or multi-value arrays). */
+export type HttpHeaderBag = Record<string, string | string[] | undefined>;

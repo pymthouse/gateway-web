@@ -13,6 +13,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createRequire } from "node:module";
 import { createGateway } from "../src/index.js";
+import { stripTrailingSlashes } from "../src/strings.js";
 
 const require = createRequire(import.meta.url);
 
@@ -131,9 +132,7 @@ async function mintPymthouseSession(): Promise<{
     routing.patterns?.directDmz?.signerApiUrl?.trim() ||
     "";
   const signerUrl =
-    process.env.SIGNER_URL?.trim() ||
-    process.env.PYMTHOUSE_SIGNER_URL?.trim() ||
-    fromRouting;
+    process.env.SIGNER_URL?.trim() || process.env.PYMTHOUSE_SIGNER_URL?.trim() || fromRouting;
   if (!signerUrl) {
     throw new Error("No signer URL from routing / PYMTHOUSE_SIGNER_URL / SIGNER_URL");
   }
@@ -143,7 +142,7 @@ async function mintPymthouseSession(): Promise<{
 
   return {
     jwt: token.jwt,
-    signerUrl: signerUrl.replace(/\/+$/, ""),
+    signerUrl: stripTrailingSlashes(signerUrl),
     balanceUsdMicros: token.balanceUsdMicros,
   };
 }
@@ -196,7 +195,9 @@ async function main(): Promise<void> {
   else console.log(`  data         ${JSON.stringify(result.data).slice(0, 400)}`);
 }
 
-main().catch((err: unknown) => {
+try {
+  await main();
+} catch (err: unknown) {
   console.error("smoke FAILED:", err);
   process.exit(1);
-});
+}
