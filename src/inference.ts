@@ -24,6 +24,10 @@ export interface GatewayConfig {
   signerUrl: string;
   signerHeaders?: HeadersMap;
   discoveryUrl?: string;
+  /**
+   * Skip TLS verification for runner and discovery hosts (self-signed orch certs).
+   * Default false — certificate verification stays on. Signer requests always verify.
+   */
   insecureTls?: boolean;
   timeoutMs?: number;
   admitted?: readonly string[] | null;
@@ -109,7 +113,7 @@ export function createGateway(config: GatewayConfig): Gateway {
   if (!config.signerUrl?.trim()) {
     throw new LivepeerGatewayError("createGateway requires signerUrl");
   }
-  const insecureTls = config.insecureTls !== false;
+  const insecureTls = config.insecureTls === true;
   const defaultTimeoutMs = config.timeoutMs ?? 600_000;
   const maxOrchestrators = Math.min(
     MAX_ORCHESTRATOR_CACHE,

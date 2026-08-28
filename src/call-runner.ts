@@ -41,6 +41,7 @@ export interface CallRunnerOptions {
   paymentUnit?: string | null;
   timeoutMs?: number;
   maxPaymentChallengeRetries?: number;
+  /** Skip TLS verification. Default false; pass true only for self-signed runner hosts. */
   insecureTls?: boolean;
 }
 
@@ -320,7 +321,7 @@ export async function callRunner(options: CallRunnerOptions): Promise<LiveRunner
       challenge,
       lastAttempt: attempt + 1 >= attempts,
       timeoutMs: options.timeoutMs ?? 5_000,
-      insecureTls: options.insecureTls !== false,
+      insecureTls: options.insecureTls === true,
       method: options.method ?? "POST",
     });
     if (outcome.kind === "success") return outcome.result;
