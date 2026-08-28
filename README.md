@@ -12,13 +12,11 @@ Published to the **`@pymthouse`** npm org (not `@livepeer` — no npm org access
 
 ## Install
 
-Once published:
-
 ```bash
 npm install @pymthouse/gateway-web
 ```
 
-Until then, link the local checkout (sibling of the consumer repo):
+For local development against a sibling checkout:
 
 ```bash
 # from storyboard (or any consumer)
@@ -80,3 +78,8 @@ Runner and discovery hosts often use self-signed certs. Pass `insecureTls: true`
 ## Storyboard
 
 Storyboard can route `sdkPost("/inference", …)` through this package when `STORYBOARD_GATEWAY_WEB=1` (pymthouse signer URL required). All other SDK endpoints stay on the SDK service.
+
+## Releasing
+
+CI runs lint, typecheck, tests, and a pack dry-run on every PR and push to `main`.
+Pushing a `v*.*.*` tag publishes to npm via trusted publishing and creates a GitHub Release. See [docs/RELEASING.md](docs/RELEASING.md).

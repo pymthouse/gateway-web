@@ -32,7 +32,8 @@
     "lint": "eslint src tests scripts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "smoke": "tsx scripts/smoke.ts"
+    "smoke": "tsx scripts/smoke.ts",
+    "prepublishOnly": "npm run build"
   },
   "engines": {
     "node": ">=20"
@@ -59,6 +60,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/pymthouse/gateway-web"
-  }
+    "url": "https://github.com/pymthouse/gateway-web.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pymthouse/gateway-web/issues"
+  },
+  "homepage": "https://github.com/pymthouse/gateway-web#readme"
 }
