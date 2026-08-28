@@ -14,7 +14,7 @@ import {
   endpointFor,
   instancesFromDiscovery,
   normalizeAppBase,
-  pickRunners,
+  pickInferencePool,
   resolveApp,
   type MeritRank,
 } from "./select.js";
@@ -132,7 +132,6 @@ export function createGateway(config: GatewayConfig): Gateway {
         signerUrl: config.signerUrl,
         signerHeaders: config.signerHeaders,
         discoveryUrl: config.discoveryUrl,
-        app: req.app,
         timeoutMs: Math.min(timeoutMs, 15_000),
         insecureTls,
       });
@@ -148,7 +147,7 @@ export function createGateway(config: GatewayConfig): Gateway {
       const cacheKey = orchestratorCacheKey(req.capability, app);
       let runners = orchCache.get(cacheKey, orchestratorCacheTtlMs);
       if (!runners) {
-        runners = pickRunners(
+        runners = pickInferencePool(
           entries,
           app,
           {
@@ -161,15 +160,15 @@ export function createGateway(config: GatewayConfig): Gateway {
         if (runners.length === 0) {
           throw new NoRunnerAvailableError(`no LR single-shot runner for app ${app} in discovery`);
         }
-        orchCache.set(cacheKey, runners);
+      orchCache.set(cacheKey, runners);
       }
 
-      const endpoint = endpointFor(app, req.endpoint);
       const payload = buildPayload(req);
       const rejections: Array<{ url: string; reason: string }> = [];
       let lastError: unknown;
 
       for (const runner of runners) {
+        const endpoint = endpointFor(runner.app, req.endpoint);
         const runnerUrl = joinEndpoint(normalizeAppBase(runner.url), endpoint);
         try {
           const result = await callRunner({
@@ -198,6 +197,7 @@ export function createGateway(config: GatewayConfig): Gateway {
         }
       }
 
+      orchCache.delete(cacheKey);
       throw new NoRunnerAvailableError(
         `all ${runners.length} orchestrator(s) failed for capability ${JSON.stringify(req.capability)}` +
           (lastError instanceof Error ? `: ${lastError.message}` : ""),

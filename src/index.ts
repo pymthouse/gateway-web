@@ -15,6 +15,8 @@ export type { DiscoverRunnersOptions } from "./discovery.js";
 export {
   pickRunner,
   pickRunners,
+  pickInferencePool,
+  appFamilyPrefix,
   resolveApp,
   endpointFor,
   normalizeAppBase,

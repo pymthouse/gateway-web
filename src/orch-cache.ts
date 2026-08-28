@@ -11,9 +11,10 @@ type CacheRow = {
 };
 
 /**
- * In-process cache of up to {@link MAX_ORCHESTRATOR_CACHE} runners (one per
- * orchestrator) for a resolved app/capability. Refreshed from discovery when
- * stale; `runInference` walks the list on retryable runner failures.
+ * In-process cache of up to {@link MAX_ORCHESTRATOR_CACHE} runners for a
+ * resolved app/capability (distinct orchestrators first, extra runner URLs
+ * fill remaining slots). Refreshed from discovery when stale; dropped after
+ * a full-pool failure so the next request re-selects.
  */
 export class OrchestratorCache {
   private readonly rows = new Map<string, CacheRow>();
@@ -30,6 +31,10 @@ export class OrchestratorCache {
 
   set(key: string, runners: LiveRunnerInstance[]): void {
     this.rows.set(key, { runners, fetchedAt: Date.now() });
+  }
+
+  delete(key: string): void {
+    this.rows.delete(key);
   }
 
   /** Test helper — drop all cached pools. */

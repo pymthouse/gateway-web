@@ -51,7 +51,9 @@ export function instancesFromDiscovery(entries: DiscoveryEntry[]): LiveRunnerIns
 }
 
 function isSingleShot(mode: string): boolean {
-  return mode.replaceAll("_", "-") === "single-shot";
+  const n = mode.replaceAll("_", "-").trim();
+  if (!n) return true;
+  return n === "single-shot";
 }
 
 function lastAppSegment(app: string): string {
@@ -60,12 +62,23 @@ function lastAppSegment(app: string): string {
   return slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
 }
 
+function compactToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 function appMatchesCapability(app: string, capability: string): boolean {
   if (app === capability) return true;
   const seg = lastAppSegment(app);
   if (seg === capability) return true;
   // storyboard/fal-flux-schnell ↔ flux-schnell
   if (seg.endsWith(`-${capability}`) || seg.endsWith(capability)) return true;
+  const n = app.toLowerCase();
+  const s = capability.toLowerCase();
+  const cn = compactToken(seg);
+  const cs = compactToken(s);
+  if (cs.length >= 4 && (cn === cs || cn.includes(cs) || cs.includes(cn))) return true;
+  if (s === "flux-dev" && /flux\.?1[-.]?dev/.test(n)) return true;
+  if (s === "flux-schnell" && n.includes("schnell")) return true;
   return false;
 }
 
@@ -119,21 +132,39 @@ function defaultChoose<T>(items: T[]): T {
   return items[Math.floor(Math.random() * items.length)] as T;
 }
 
+function admitOrchestrator(
+  addr: string,
+  admitted: readonly string[] | null | undefined,
+): boolean {
+  if (!admitted || admitted.length === 0) return true;
+  return admitted.some((a) => Boolean(a) && addr.includes(a));
+}
+
 function singleShotCandidates(
   entries: DiscoveryEntry[],
   appId: string,
   admitted: readonly string[] | null | undefined,
 ): LiveRunnerInstance[] {
-  function admit(addr: string): boolean {
-    if (!admitted || admitted.length === 0) return true;
-    return admitted.some((a) => Boolean(a) && addr.includes(a));
-  }
-
   return instancesFromDiscovery(entries).filter(
     (inst) =>
-      inst.app === appId && isSingleShot(inst.mode) && inst.url && admit(inst.orchestratorUrl),
+      inst.app === appId &&
+      isSingleShot(inst.mode) &&
+      inst.url &&
+      admitOrchestrator(inst.orchestratorUrl, admitted),
   );
 }
+
+/** `image-generation/black-forest-labs/FLUX.1-dev` → `image-generation`. */
+export function appFamilyPrefix(app: string): string {
+  const slash = app.indexOf("/");
+  return slash > 0 ? app.slice(0, slash) : "";
+}
+
+const MODALITY_FAMILIES = new Set([
+  "image-generation",
+  "video-generation",
+  "audio-generation",
+]);
 
 function orderOrchestratorUrls(
   orchUrls: string[],
@@ -160,21 +191,31 @@ function orderOrchestratorUrls(
 }
 
 /**
- * Up to `maxOrchestrators` single-shot runners — at most one runner per distinct
- * orchestrator address, ordered by merit rank then discovery order.
+ * Up to `max` single-shot runners for `appId`.
+ *
+ * Prefers distinct orchestrator addresses (merit rank, then discovery order),
+ * then fills remaining slots with other runner URLs for the same app — including
+ * extra GPUs that share an orchestrator host.
  */
 export function pickRunners(
   entries: DiscoveryEntry[],
   appId: string,
   options: PickRunnerOptions = {},
-  maxOrchestrators = 5,
+  max = 5,
 ): LiveRunnerInstance[] {
   const choose = options.choose ?? defaultChoose;
+  const limit = Math.max(1, max);
   const pairs = singleShotCandidates(entries, appId, options.admitted);
   if (pairs.length === 0) return [];
 
-  const byOrch = new Map<string, LiveRunnerInstance[]>();
+  const byUrl = new Map<string, LiveRunnerInstance>();
   for (const inst of pairs) {
+    if (!byUrl.has(inst.url)) byUrl.set(inst.url, inst);
+  }
+  const unique = [...byUrl.values()];
+
+  const byOrch = new Map<string, LiveRunnerInstance[]>();
+  for (const inst of unique) {
     const key = inst.orchestratorUrl || inst.url;
     const bucket = byOrch.get(key);
     if (bucket) bucket.push(inst);
@@ -187,15 +228,62 @@ export function pickRunners(
     options.meritRank,
   );
 
-  const limit = Math.max(1, Math.min(maxOrchestrators, orchOrder.length));
   const picked: LiveRunnerInstance[] = [];
+  const usedUrls = new Set<string>();
   for (const orch of orchOrder) {
     if (picked.length >= limit) break;
     const bucket = byOrch.get(orch);
     if (!bucket?.length) continue;
-    picked.push(bucket.length === 1 ? bucket[0]! : choose(bucket));
+    const inst = bucket.length === 1 ? bucket[0]! : choose(bucket);
+    picked.push(inst);
+    usedUrls.add(inst.url);
   }
+
+  for (const inst of unique) {
+    if (picked.length >= limit) break;
+    if (usedUrls.has(inst.url)) continue;
+    picked.push(inst);
+    usedUrls.add(inst.url);
+  }
+
   return picked;
+}
+
+/**
+ * Exact-app pool first, then other single-shot apps in the same family
+ * (`image-generation/…`) on orchestrators not already in the pool.
+ */
+export function pickInferencePool(
+  entries: DiscoveryEntry[],
+  appId: string,
+  options: PickRunnerOptions = {},
+  max = 5,
+): LiveRunnerInstance[] {
+  const limit = Math.max(1, max);
+  const exact = pickRunners(entries, appId, options, limit);
+  if (exact.length >= limit) return exact;
+
+  const family = appFamilyPrefix(appId);
+  if (!family || !MODALITY_FAMILIES.has(family)) return exact;
+
+  const usedUrls = new Set(exact.map((r) => r.url));
+  const usedOrchs = new Set(exact.map((r) => r.orchestratorUrl).filter(Boolean));
+  const extras: LiveRunnerInstance[] = [];
+
+  for (const inst of instancesFromDiscovery(entries)) {
+    if (extras.length + exact.length >= limit) break;
+    if (inst.app === appId) continue;
+    if (!inst.app.startsWith(`${family}/`)) continue;
+    if (!isSingleShot(inst.mode) || !inst.url) continue;
+    if (!admitOrchestrator(inst.orchestratorUrl, options.admitted)) continue;
+    if (usedUrls.has(inst.url)) continue;
+    if (inst.orchestratorUrl && usedOrchs.has(inst.orchestratorUrl)) continue;
+    extras.push(inst);
+    usedUrls.add(inst.url);
+    if (inst.orchestratorUrl) usedOrchs.add(inst.orchestratorUrl);
+  }
+
+  return [...exact, ...extras];
 }
 
 /**
