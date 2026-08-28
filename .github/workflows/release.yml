@@ -1,0 +1,90 @@
+# Provenance: package.json "repository.url" must be the same GitHub repo this
+# workflow runs in, or npm returns E422 when verifying the sigstore bundle.
+#
+# npm auth: Trusted Publishing (OIDC). Configure on npmjs.com for this repo and
+# workflow filename `release.yml`. Do not set secrets.NPM_TOKEN on publish — it
+# overrides OIDC and can cause EOTP. See docs/RELEASING.md.
+name: release
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish (e.g. v0.1.0)"
+        required: true
+        type: string
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+          scope: "@pymthouse"
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm run build
+      - name: Verify package.json repository matches this repo
+        run: |
+          # Strip the optional `git+` prefix so both `https://…` and
+          # `git+https://…` repository.url formats satisfy the provenance check.
+          REPO_URL=$(node -p "require('./package.json').repository.url.replace(/^git\\+/, '')")
+          EXPECTED="https://github.com/${GITHUB_REPOSITORY}.git"
+          if [ "$REPO_URL" != "$EXPECTED" ]; then
+            echo "::error::package.json repository.url must be ${EXPECTED} for npm provenance (got ${REPO_URL})"
+            exit 1
+          fi
+      - name: Install npm CLI for trusted publishing
+        run: npm install -g npm@11.5.1 --ignore-scripts
+      - name: Publish to npm via OIDC (trusted publishing)
+        # Use npm CLI (not yarn/pnpm publish): OIDC is implemented in npm.
+        # Do not set NODE_AUTH_TOKEN here — setup-node wires OIDC from id-token: write.
+        # Provenance is generated automatically with trusted publishing.
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "${PKG}@${VERSION}" version >/dev/null 2>&1; then
+            echo "Already published ${PKG}@${VERSION}; skipping npm publish."
+            exit 0
+          fi
+          # Prerelease versions (e.g. 0.1.0-rc.1) must publish under a non-`latest`
+          # dist-tag so `npm install <pkg>` keeps resolving the stable release.
+          case "$VERSION" in
+            *-*) npm publish --access public --tag rc ;;
+            *)   npm publish --access public ;;
+          esac
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}"
+          PKG=$(node -p "require('./package.json').name")
+          VER=$(node -p "require('./package.json').version")
+          if gh release view "${TAG}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists on ${GITHUB_REPOSITORY}; skipping create."
+            exit 0
+          fi
+          # Mark prerelease versions (containing a hyphen) as GitHub prereleases.
+          # `case` avoids a non-zero `grep` exit tripping `set -e` in $( … ).
+          PRERELEASE_FLAG=""
+          case "$VER" in
+            *-*) PRERELEASE_FLAG="--prerelease" ;;
+          esac
+          gh release create "${TAG}" \
+            -R "${GITHUB_REPOSITORY}" \
+            --title "${PKG} v${VER}" \
+            --generate-notes \
+            --verify-tag \
+            $PRERELEASE_FLAG
