@@ -58,7 +58,7 @@ is `vllm/qwen3-coder-30b` (chat completion). Override with `CAPABILITY`,
 
 ## TLS
 
-Runner and discovery hosts often use self-signed certs. Pass `insecureTls: true` on the gateway (or per-call). Signer calls always verify TLS.
+Runner and discovery hosts often use self-signed certs. TLS verification is **skipped by default** for those hosts (`insecureTls` defaults to `true`). Pass `insecureTls: false` to verify. Signer calls always verify TLS.
 
 ## Storyboard
 

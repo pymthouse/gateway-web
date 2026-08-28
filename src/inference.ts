@@ -24,6 +24,10 @@ export interface GatewayConfig {
   signerUrl: string;
   signerHeaders?: HeadersMap;
   discoveryUrl?: string;
+  /**
+   * Skip TLS verification for runner and discovery hosts (self-signed orch certs).
+   * Default true. Signer requests always verify. Pass false to verify runner/discovery certs.
+   */
   insecureTls?: boolean;
   timeoutMs?: number;
   admitted?: readonly string[] | null;

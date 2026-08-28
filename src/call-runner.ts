@@ -41,6 +41,7 @@ export interface CallRunnerOptions {
   paymentUnit?: string | null;
   timeoutMs?: number;
   maxPaymentChallengeRetries?: number;
+  /** Skip TLS verification. Default true; pass false to verify runner certs. */
   insecureTls?: boolean;
 }
 

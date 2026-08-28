@@ -100,6 +100,7 @@ export interface DiscoverRunnersOptions {
   app?: FilterValue;
   gpu?: FilterValue;
   timeoutMs?: number;
+  /** Skip TLS verification when true. */
   insecureTls?: boolean;
 }
 
