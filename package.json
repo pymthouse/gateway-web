@@ -1,6 +1,6 @@
 {
   "name": "@pymthouse/gateway-web",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Minimal Node.js Livepeer live-runner gateway: discovery, 402 payment handshake, and single-shot inference.",
   "license": "MIT",
   "author": "PmtHouse",
