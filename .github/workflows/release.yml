@@ -33,7 +33,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           scope: "@pymthouse"
           package-manager-cache: false
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: npm test
       - run: npm run build
       - name: Verify package.json repository matches this repo
