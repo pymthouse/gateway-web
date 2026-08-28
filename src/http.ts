@@ -13,14 +13,14 @@ const REFRESH_SESSION_ORCHESTRATOR_URL_HEADER = "Livepeer-Orchestrator-URL";
 
 let insecureAgent: Agent | undefined;
 
+function tlsConnectOptions(insecureTls: boolean): { rejectUnauthorized: boolean } {
+  return { rejectUnauthorized: insecureTls === false };
+}
+
 function dispatcherFor(insecureTls: boolean): Agent | undefined {
-  if (insecureTls !== true) return undefined;
+  if (!insecureTls) return undefined;
   if (!insecureAgent) {
-    // Livepeer runners often present self-signed certificates. This agent is
-    // constructed only when the caller passes insecureTls: true. Signer traffic
-    // never uses it.
-    // codeql[js/disabling-certificate-validation]
-    insecureAgent = new Agent({ connect: { rejectUnauthorized: false } });
+    insecureAgent = new Agent({ connect: tlsConnectOptions(insecureTls) });
   }
   return insecureAgent;
 }
@@ -30,7 +30,7 @@ export interface HttpRequestOptions {
   payload?: Record<string, unknown> | null;
   headers?: HeadersMap;
   timeoutMs?: number;
-  /** Skip TLS verification. Default false. */
+  /** Skip TLS verification for this request. */
   insecureTls?: boolean;
   accept?: string;
 }
