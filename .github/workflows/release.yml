@@ -30,8 +30,9 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          registry-url: "https://registry.npmjs.org"
-          scope: "@pymthouse"
+          # Do not set registry-url: setup-node then writes
+          # _authToken=${NODE_AUTH_TOKEN} into .npmrc and npm skips OIDC
+          # (E404 / ENEEDAUTH). See npm/documentation#1960.
           package-manager-cache: false
       - run: npm ci --ignore-scripts
       - run: npm test
@@ -50,14 +51,15 @@ jobs:
         run: npm install -g npm@11.5.1 --ignore-scripts
       - name: Publish to npm via OIDC (trusted publishing)
         # Use npm CLI (not yarn/pnpm publish): OIDC is implemented in npm.
-        # Do not set NODE_AUTH_TOKEN here — an empty token in setup-node's .npmrc
-        # makes npm skip OIDC and fail with E404 (npm/documentation#1960).
-        # Provenance is generated automatically with trusted publishing.
+        # Do not set NODE_AUTH_TOKEN / registry-url — those force classic auth
+        # and skip trusted publishing. Provenance is automatic with OIDC.
         run: |
-          if [ -n "${NPM_CONFIG_USERCONFIG:-}" ] && [ -f "${NPM_CONFIG_USERCONFIG}" ]; then
-            sed -i '/_authToken/d' "${NPM_CONFIG_USERCONFIG}"
+          unset NODE_AUTH_TOKEN NPM_TOKEN NPM_CONFIG_USERCONFIG
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "::error::ACTIONS_ID_TOKEN_REQUEST_URL is unset; id-token: write is required for OIDC."
+            exit 1
           fi
-          unset NODE_AUTH_TOKEN
+          echo "npm $(npm -v); OIDC request URL is set"
           PKG=$(node -p "require('./package.json').name")
           VERSION=$(node -p "require('./package.json').version")
           if npm view "${PKG}@${VERSION}" version >/dev/null 2>&1; then
