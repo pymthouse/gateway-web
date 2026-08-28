@@ -16,21 +16,6 @@ Published to the **`@pymthouse`** npm org (not `@livepeer` — no npm org access
 npm install @pymthouse/gateway-web
 ```
 
-For local development against a sibling checkout:
-
-```bash
-# from storyboard (or any consumer)
-bun add file:../gateway-web   # or: npm install file:../gateway-web
-```
-
-Build the package before linking so `dist/` exists:
-
-```bash
-cd ../gateway-web && npm run build
-```
-
-**Next.js / Turbopack note:** Bun's `file:` install uses per-file symlinks that Turbopack rejects. Storyboard's `scripts/ensure-local-gateway-web.mjs` (postinstall + prebuild) copies `dist/` + `package.json` into `node_modules/@pymthouse/gateway-web` as real files. Once this package is on the npm registry, drop the `file:` dep and that script no-ops.
-
 Node 20+. Runtime dependency: `undici` (needed so TLS verification can be disabled **per request** for self-signed orchestrator/runner certs — never set `NODE_TLS_REJECT_UNAUTHORIZED=0`).
 
 ## Usage
@@ -77,7 +62,9 @@ Runner and discovery hosts often use self-signed certs. Pass `insecureTls: true`
 
 ## Storyboard
 
-Storyboard can route `sdkPost("/inference", …)` through this package when `STORYBOARD_GATEWAY_WEB=1` (pymthouse signer URL required). All other SDK endpoints stay on the SDK service.
+Storyboard depends on this package from npm (`@pymthouse/gateway-web`). It routes
+`sdkPost("/inference", …)` through the gateway when `STORYBOARD_GATEWAY_WEB=1`
+(pymthouse signer URL required). All other SDK endpoints stay on the SDK service.
 
 ## Releasing
 
