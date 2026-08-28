@@ -64,14 +64,16 @@ export function runnerPaymentType(
   if (unit) {
     const paymentType = RUNNER_PAYMENT_TYPES_BY_UNIT[unit];
     if (paymentType === undefined) {
-      const supported = Object.keys(RUNNER_PAYMENT_TYPES_BY_UNIT).sort().join(", ");
+      const supported = Object.keys(RUNNER_PAYMENT_TYPES_BY_UNIT)
+        .sort((a, b) => a.localeCompare(b))
+        .join(", ");
       throw new LivepeerGatewayError(
         `Unsupported live runner payment unit ${JSON.stringify(unit)}; expected one of ${supported}`,
       );
     }
     return paymentType;
   }
-  if (runner != null && runner.app === "live-video-to-video/scope") return "lv2v";
+  if (runner?.app === "live-video-to-video/scope") return "lv2v";
   return "live";
 }
 
@@ -152,19 +154,148 @@ function startFunding(paymentSession: LivePaymentSession): { cancel: () => Promi
   };
 }
 
+function parseRunnerJsonBody(
+  body: Buffer,
+  runnerUrl: string,
+  contentType: string,
+): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body.toString("utf8")) as unknown;
+  } catch (e) {
+    throw new LivepeerGatewayError(
+      `HTTP JSON error: endpoint did not return valid JSON: ${e} (url=${runnerUrl}, content_type=${contentType})`,
+    );
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new LivepeerGatewayError(
+      `Live runner call expected JSON object, got ${Array.isArray(parsed) ? "array" : typeof parsed}`,
+    );
+  }
+  return parsed as Record<string, unknown>;
+}
+
+async function resolveChallengePayment(options: {
+  challenge: LivePaymentChallenge;
+  paymentType: string;
+  signerUrl: string;
+  signerHeaders: HeadersMap | undefined;
+  maxPrice: LiveRunnerPriceInfo | null;
+  app: string | null;
+  requestHeaders: HeadersMap;
+}): Promise<{ session: LivePaymentSession; sessionId: string; needsOngoingFunding: boolean }> {
+  const paid = await getRunnerPayment({
+    challenge: options.challenge,
+    paymentType: options.paymentType,
+    signerUrl: options.signerUrl,
+    signerHeaders: options.signerHeaders,
+    maxPrice: options.maxPrice,
+    app: options.app,
+  });
+  options.requestHeaders["Livepeer-Payment"] = paid.payment.payment;
+  options.requestHeaders["Livepeer-Segment"] = paid.payment.segCreds ?? "";
+  return {
+    session: paid.session,
+    sessionId: options.challenge.manifestId,
+    needsOngoingFunding: METERED_PAYMENT_TYPES.has(options.paymentType),
+  };
+}
+
+function asPaymentChallenge(error: unknown, signerUrl: string | null): LivePaymentChallenge {
+  if (!(error instanceof LivepeerHTTPError) || error.status !== 402) throw error;
+  if (!signerUrl) {
+    throw new LivepeerGatewayError("Live runner paid call requires signerUrl");
+  }
+  return parseRunnerPaymentChallenge(error);
+}
+
+interface PaidAttemptInput {
+  runnerUrl: string;
+  requestPayload: Record<string, unknown>;
+  signerUrl: string | null;
+  signerHeaders: HeadersMap | undefined;
+  paymentType: string;
+  maxPrice: LiveRunnerPriceInfo | null;
+  payerAddress: string;
+  runner: LiveRunnerInstance | null | undefined;
+  challenge: LivePaymentChallenge | null;
+  lastAttempt: boolean;
+  timeoutMs: number;
+  insecureTls: boolean;
+  method: string;
+}
+
+type PaidAttemptResult =
+  | { kind: "success"; result: LiveRunnerCallResult }
+  | { kind: "retry"; challenge: LivePaymentChallenge | null };
+
+async function attemptPaidCall(input: PaidAttemptInput): Promise<PaidAttemptResult> {
+  let paymentSession: LivePaymentSession | null = null;
+  let sessionId = "";
+  let needsOngoingFunding = false;
+  const requestHeaders: HeadersMap = { Accept: "*/*" };
+  if (input.signerUrl) {
+    requestHeaders[LIVE_RUNNER_PAYER_ADDRESS_HEADER] = input.payerAddress;
+  }
+
+  if (input.challenge !== null) {
+    try {
+      const paid = await resolveChallengePayment({
+        challenge: input.challenge,
+        paymentType: input.paymentType,
+        signerUrl: input.signerUrl ?? "",
+        signerHeaders: input.signerHeaders,
+        maxPrice: input.maxPrice,
+        app: input.runner?.app ?? null,
+        requestHeaders,
+      });
+      paymentSession = paid.session;
+      sessionId = paid.sessionId;
+      needsOngoingFunding = paid.needsOngoingFunding;
+    } catch (e) {
+      if (!(e instanceof SignerRefreshRequired) || input.lastAttempt) throw e;
+      return { kind: "retry", challenge: null };
+    }
+  }
+
+  const funding = needsOngoingFunding && paymentSession ? startFunding(paymentSession) : null;
+  try {
+    const { body, contentType } = await requestBody(input.runnerUrl, {
+      method: input.method,
+      payload: input.requestPayload,
+      headers: requestHeaders,
+      timeoutMs: input.timeoutMs,
+      insecureTls: input.insecureTls,
+      accept: "*/*",
+    });
+    const isJson = isJsonContentType(contentType);
+    const data = isJson ? parseRunnerJsonBody(body, input.runnerUrl, contentType) : {};
+    const dataSessionId = data.session_id;
+    return {
+      kind: "success",
+      result: {
+        data,
+        runnerUrl: input.runnerUrl,
+        runner: input.runner ?? null,
+        sessionId: sessionId || (typeof dataSessionId === "string" ? dataSessionId.trim() : ""),
+        paymentSession: input.paymentType === "fixed" ? null : paymentSession,
+        content: isJson ? null : body,
+        contentType,
+      },
+    };
+  } catch (e) {
+    return { kind: "retry", challenge: asPaymentChallenge(e, input.signerUrl) };
+  } finally {
+    if (funding) await funding.cancel();
+  }
+}
+
 export async function callRunner(options: CallRunnerOptions): Promise<LiveRunnerCallResult> {
   const runnerUrl = (options.runnerUrl ?? options.runner?.url ?? "").trim();
   if (!runnerUrl) {
     throw new LivepeerGatewayError("Live runner call requires runnerUrl");
   }
-  const requestPayload = options.payload ?? {};
   const signerUrl = options.signerUrl ?? null;
-  const paymentType = signerUrl ? runnerPaymentType(options.runner, options.paymentUnit) : "";
-  let maxPrice: LiveRunnerPriceInfo | null = null;
-  if (signerUrl && options.runner?.priceInfo) {
-    maxPrice = padRunnerPrice(options.runner.priceInfo);
-  }
-
   let payerAddress = "";
   if (signerUrl) {
     const signer = await getSignerInfo(signerUrl, options.signerHeaders);
@@ -174,91 +305,26 @@ export async function callRunner(options: CallRunnerOptions): Promise<LiveRunner
   let challenge: LivePaymentChallenge | null = null;
   const maxRetries = Math.max(0, options.maxPaymentChallengeRetries ?? 3);
   const attempts = (maxRetries + 1) * 2;
-  const timeoutMs = options.timeoutMs ?? 5_000;
-  const insecureTls = options.insecureTls !== false;
-  const method = options.method ?? "POST";
 
   for (let attempt = 0; attempt < attempts; attempt++) {
-    let paymentSession: LivePaymentSession | null = null;
-    let sessionId = "";
-    let needsOngoingFunding = false;
-    const requestHeaders: HeadersMap = { Accept: "*/*" };
-    if (signerUrl) {
-      requestHeaders[LIVE_RUNNER_PAYER_ADDRESS_HEADER] = payerAddress;
-    }
-
-    if (challenge !== null) {
-      try {
-        const paid = await getRunnerPayment({
-          challenge,
-          paymentType,
-          signerUrl: signerUrl ?? "",
-          signerHeaders: options.signerHeaders,
-          maxPrice,
-          app: options.runner?.app ?? null,
-        });
-        paymentSession = paid.session;
-        requestHeaders["Livepeer-Payment"] = paid.payment.payment;
-        requestHeaders["Livepeer-Segment"] = paid.payment.segCreds ?? "";
-        sessionId = challenge.manifestId;
-        needsOngoingFunding = METERED_PAYMENT_TYPES.has(paymentType);
-      } catch (e) {
-        if (e instanceof SignerRefreshRequired) {
-          if (attempt + 1 >= attempts) throw e;
-          challenge = null;
-          continue;
-        }
-        throw e;
-      }
-    }
-
-    const funding = needsOngoingFunding && paymentSession ? startFunding(paymentSession) : null;
-    try {
-      const { body, contentType } = await requestBody(runnerUrl, {
-        method,
-        payload: requestPayload,
-        headers: requestHeaders,
-        timeoutMs,
-        insecureTls,
-        accept: "*/*",
-      });
-      const isJson = isJsonContentType(contentType);
-      let data: Record<string, unknown> = {};
-      if (isJson) {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(body.toString("utf8")) as unknown;
-        } catch (e) {
-          throw new LivepeerGatewayError(
-            `HTTP JSON error: endpoint did not return valid JSON: ${e} (url=${runnerUrl}, content_type=${contentType})`,
-          );
-        }
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          throw new LivepeerGatewayError(
-            `Live runner call expected JSON object, got ${Array.isArray(parsed) ? "array" : typeof parsed}`,
-          );
-        }
-        data = parsed as Record<string, unknown>;
-      }
-      const dataSessionId = data.session_id;
-      return {
-        data,
-        runnerUrl,
-        runner: options.runner ?? null,
-        sessionId: sessionId || (typeof dataSessionId === "string" ? dataSessionId.trim() : ""),
-        paymentSession: paymentType === "fixed" ? null : paymentSession,
-        content: isJson ? null : body,
-        contentType,
-      };
-    } catch (e) {
-      if (!(e instanceof LivepeerHTTPError) || e.status !== 402) throw e;
-      if (!signerUrl) {
-        throw new LivepeerGatewayError("Live runner paid call requires signerUrl");
-      }
-      challenge = parseRunnerPaymentChallenge(e);
-    } finally {
-      if (funding) await funding.cancel();
-    }
+    const outcome = await attemptPaidCall({
+      runnerUrl,
+      requestPayload: options.payload ?? {},
+      signerUrl,
+      signerHeaders: options.signerHeaders,
+      paymentType: signerUrl ? runnerPaymentType(options.runner, options.paymentUnit) : "",
+      maxPrice:
+        signerUrl && options.runner?.priceInfo ? padRunnerPrice(options.runner.priceInfo) : null,
+      payerAddress,
+      runner: options.runner,
+      challenge,
+      lastAttempt: attempt + 1 >= attempts,
+      timeoutMs: options.timeoutMs ?? 5_000,
+      insecureTls: options.insecureTls !== false,
+      method: options.method ?? "POST",
+    });
+    if (outcome.kind === "success") return outcome.result;
+    challenge = outcome.challenge;
   }
 
   throw new LivepeerGatewayError("Live runner call exhausted payment challenge retries");

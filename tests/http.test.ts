@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LivepeerGatewayError, LivepeerHTTPError } from "../src/errors.js";
 import { getJson, httpOrigin, joinEndpoint, postJson } from "../src/http.js";
+import { stripTrailingSlashes } from "../src/strings.js";
 import { json, startMockServer } from "./mock-server.js";
 
 describe("http", () => {
@@ -12,6 +13,12 @@ describe("http", () => {
   it("joinEndpoint appends a suffix", () => {
     expect(joinEndpoint("http://x/app", "/generate")).toBe("http://x/app/generate");
     expect(joinEndpoint("http://x/app/", "generate")).toBe("http://x/app/generate");
+  });
+
+  it("stripTrailingSlashes removes only trailing slashes", () => {
+    expect(stripTrailingSlashes("https://x/app///")).toBe("https://x/app");
+    expect(stripTrailingSlashes("/")).toBe("");
+    expect(stripTrailingSlashes("noslash")).toBe("noslash");
   });
 
   it("getJson / postJson round-trip", async () => {

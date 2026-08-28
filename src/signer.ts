@@ -7,6 +7,7 @@ import {
   SkipPaymentCycle,
 } from "./errors.js";
 import { httpOrigin, postEmpty, postJson } from "./http.js";
+import { stripTrailingSlashes } from "./strings.js";
 import type {
   GetPaymentResponse,
   HeadersMap,
@@ -182,10 +183,8 @@ export class LivePaymentSession {
         await this.sendPayment();
       } catch (e) {
         if (e instanceof SkipPaymentCycle) continue;
-        if (e instanceof LivepeerHTTPError) {
-          if (e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429) {
-            return e.status === 404;
-          }
+        if (e instanceof LivepeerHTTPError && isFatalMeteredHttpStatus(e.status)) {
+          return e.status === 404;
         }
       }
     }
@@ -237,7 +236,7 @@ export class LivePaymentSession {
     if (!signer.address) {
       throw new PaymentError("Cannot refresh payment without signer address");
     }
-    const url = `${this.challenge.paymentUrl.replace(/\/+$/, "")}/refresh-payment`;
+    const url = `${stripTrailingSlashes(this.challenge.paymentUrl)}/refresh-payment`;
     const data = await postJson(
       url,
       {
@@ -260,6 +259,10 @@ export class LivePaymentSession {
       paymentParams,
     };
   }
+}
+
+function isFatalMeteredHttpStatus(status: number): boolean {
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
 function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {

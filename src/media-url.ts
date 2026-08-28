@@ -3,89 +3,112 @@
  *
  * Port of storyboard `packages/creative-kit/src/utils/url-extract.ts`.
  */
-export function extractMediaUrl(resp: unknown): string | null {
-  if (!resp || typeof resp !== "object") return null;
-  const r = resp as Record<string, unknown>;
 
-  // OpenAI Images: { data: [{ url | b64_json }] }
-  if (Array.isArray(r.data)) {
-    const first = r.data[0];
-    if (first && typeof first === "object") {
-      const row = first as Record<string, unknown>;
-      if (typeof row.url === "string" && row.url) return row.url;
-      if (typeof row.b64_json === "string" && row.b64_json) {
-        return `data:image/png;base64,${row.b64_json}`;
-      }
-    }
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function stringProp(rec: Record<string, unknown>, key: string): string | undefined {
+  const value = rec[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function openaiImagesUrl(r: Record<string, unknown>): string | null {
+  if (!Array.isArray(r.data)) return null;
+  const row = asRecord(r.data[0]);
+  if (!row) return null;
+  const url = stringProp(row, "url");
+  if (url) return url;
+  const b64 = stringProp(row, "b64_json");
+  return b64 ? `data:image/png;base64,${b64}` : null;
+}
+
+function mediaFieldUrls(rec: Record<string, unknown>): string | undefined {
+  return (
+    stringProp(rec, "image_url") ?? stringProp(rec, "video_url") ?? stringProp(rec, "audio_url")
+  );
+}
+
+function firstArrayItemUrl(data: Record<string, unknown>, key: string): string | undefined {
+  const arr = data[key];
+  if (!Array.isArray(arr)) return undefined;
+  const row = asRecord(arr[0]);
+  return row ? stringProp(row, "url") : undefined;
+}
+
+function nestedObjectUrl(data: Record<string, unknown>, key: string): string | undefined {
+  const rec = asRecord(data[key]);
+  return rec ? stringProp(rec, "url") : undefined;
+}
+
+const NESTED_MEDIA_KEYS = [
+  "image",
+  "video",
+  "audio",
+  "audio_file",
+  "model_mesh",
+  "animation_glb",
+  "rigged_character_glb",
+  "model_glb",
+  "output",
+] as const;
+
+function nestedMediaUrl(data: Record<string, unknown>): string | undefined {
+  for (const key of NESTED_MEDIA_KEYS) {
+    const url = nestedObjectUrl(data, key);
+    if (url) return url;
   }
+  return undefined;
+}
 
-  const data = (r.data ?? r) as Record<string, unknown>;
-  if (!data || typeof data !== "object" || Array.isArray(data)) {
-    if (typeof r.url === "string") return r.url;
-    return null;
+const MODEL_URL_FORMATS = ["glb", "fbx", "obj", "usdz", "stl"] as const;
+
+function modelBundleUrl(data: Record<string, unknown>): string | undefined {
+  const bundle = asRecord(data.model_urls);
+  if (!bundle) return undefined;
+  for (const fmt of MODEL_URL_FORMATS) {
+    const value = bundle[fmt];
+    if (typeof value === "string" && value) return value;
+    const rec = asRecord(value);
+    const url = rec ? stringProp(rec, "url") : undefined;
+    if (url) return url;
   }
+  return undefined;
+}
 
-  if (typeof r.image_url === "string") return r.image_url;
-  if (typeof r.video_url === "string") return r.video_url;
-  if (typeof r.audio_url === "string") return r.audio_url;
-  if (typeof r.url === "string") return r.url;
-  if (typeof data.image_url === "string") return data.image_url;
-  if (typeof data.video_url === "string") return data.video_url;
-  if (typeof data.audio_url === "string") return data.audio_url;
-
-  const images = data.images as Array<{ url?: string }> | undefined;
-  if (images?.[0]?.url) return images[0].url;
-
-  const meshes = data.model_meshes as Array<{ url?: string }> | undefined;
-  if (meshes?.[0]?.url) return meshes[0].url;
-
-  const nested = (key: string): string | undefined => {
-    const v = data[key];
-    if (v && typeof v === "object" && "url" in (v as object)) {
-      const u = (v as { url?: unknown }).url;
-      return typeof u === "string" ? u : undefined;
-    }
-    return undefined;
-  };
-  const fromNested =
-    nested("image") ??
-    nested("video") ??
-    nested("audio") ??
-    nested("audio_file") ??
-    nested("model_mesh") ??
-    nested("animation_glb") ??
-    nested("rigged_character_glb") ??
-    nested("model_glb") ??
-    nested("output");
-  if (fromNested) return fromNested;
-
-  const modelUrls = data.model_urls;
-  if (modelUrls && typeof modelUrls === "object") {
-    const bundle = modelUrls as Record<string, unknown>;
-    for (const fmt of ["glb", "fbx", "obj", "usdz", "stl"]) {
-      const v = bundle[fmt];
-      if (typeof v === "string" && v) return v;
-      if (v && typeof v === "object" && typeof (v as { url?: unknown }).url === "string") {
-        return (v as { url: string }).url;
-      }
-    }
-  }
-
-  if (typeof data.url === "string") return data.url;
-
-  const inner = data.data;
-  if (inner && typeof inner === "object") {
-    const innerObj = inner as Record<string, unknown>;
-    if (typeof innerObj.url === "string") return innerObj.url;
-    if (typeof innerObj.image_url === "string") return innerObj.image_url;
-    if (typeof innerObj.video_url === "string") return innerObj.video_url;
-    if (typeof innerObj.audio_url === "string") return innerObj.audio_url;
-  }
-
-  for (const v of Object.values(data)) {
-    if (typeof v === "string" && /^https?:\/\//.test(v)) return v;
+function firstHttpString(data: Record<string, unknown>): string | null {
+  for (const value of Object.values(data)) {
+    if (typeof value === "string" && /^https?:\/\//.test(value)) return value;
   }
   return null;
+}
+
+export function extractMediaUrl(resp: unknown): string | null {
+  const r = asRecord(resp);
+  if (!r) return null;
+
+  const openai = openaiImagesUrl(r);
+  if (openai) return openai;
+
+  const data = asRecord(r.data ?? r);
+  if (!data) {
+    return typeof r.url === "string" ? r.url : null;
+  }
+
+  const inner = asRecord(data.data);
+  return (
+    mediaFieldUrls(r) ??
+    stringProp(r, "url") ??
+    mediaFieldUrls(data) ??
+    firstArrayItemUrl(data, "images") ??
+    firstArrayItemUrl(data, "model_meshes") ??
+    nestedMediaUrl(data) ??
+    modelBundleUrl(data) ??
+    stringProp(data, "url") ??
+    (inner ? (stringProp(inner, "url") ?? mediaFieldUrls(inner)) : undefined) ??
+    firstHttpString(data)
+  );
 }
 
 export function mediaKind(url: string): "image" | "video" | "audio" {

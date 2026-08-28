@@ -101,9 +101,7 @@ describe("select", () => {
     expect(resolveApp(instances, "flux-schnell")).toBe(
       "image-generation/black-forest-labs/FLUX.1-schnell",
     );
-    expect(resolveApp(instances, "flux-dev")).toBe(
-      "image-generation/black-forest-labs/FLUX.1-dev",
-    );
+    expect(resolveApp(instances, "flux-dev")).toBe("image-generation/black-forest-labs/FLUX.1-dev");
   });
 
   it("resolveApp does not send flux-schnell to FLUX.1-dev", () => {
@@ -117,9 +115,7 @@ describe("select", () => {
       ]),
     ]);
     expect(resolveApp(instances, "flux-schnell")).toBeNull();
-    expect(resolveApp(instances, "flux-dev")).toBe(
-      "image-generation/black-forest-labs/FLUX.1-dev",
-    );
+    expect(resolveApp(instances, "flux-dev")).toBe("image-generation/black-forest-labs/FLUX.1-dev");
   });
 
   it("pickRunner keeps single-shot (including single_shot) and matching app", () => {
