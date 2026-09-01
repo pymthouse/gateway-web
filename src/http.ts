@@ -8,7 +8,7 @@ import {
 import { stripTrailingSlashes } from "./strings.js";
 import type { HeadersMap, HttpHeaderBag } from "./types.js";
 
-const USER_AGENT = "pymthouse-gateway-web/0.1.1";
+const USER_AGENT = "pymthouse-gateway-web/0.2.0";
 const REFRESH_SESSION_ORCHESTRATOR_URL_HEADER = "Livepeer-Orchestrator-URL";
 
 let insecureAgent: Agent | undefined;

@@ -5,7 +5,7 @@ import { clearSignerInfoCache } from "../src/signer.js";
 import { json, startMockServer } from "./mock-server.js";
 
 describe("runInference", () => {
-  it("discovers, rewrites /session → /app, pays 402, extracts media URL", async () => {
+  it("discovers, hits /app + /generate, pays 402, extracts media URL", async () => {
     let generateHits = 0;
     const server = await startMockServer((req, res) => {
       if (req.pathname === "/discover-orchestrators") {
@@ -15,7 +15,7 @@ describe("runInference", () => {
             runners: [
               {
                 app: "storyboard/fal-flux-schnell",
-                url: `${req.url.origin}/apps/flux/session`,
+                url: `${req.url.origin}/apps/flux/app`,
                 mode: "single-shot",
                 runner_id: "r1",
                 price_info: { price: 1, currency: "usd", unit: "fixed" },
@@ -64,6 +64,7 @@ describe("runInference", () => {
       expect(res.imageUrl).toBe("https://cdn.example/out.jpg");
       expect(res.videoUrl).toBeNull();
       expect(res.app).toBe("storyboard/fal-flux-schnell");
+      expect(res.mode).toBe("single-shot");
       expect(res.runnerUrl).toContain("/apps/flux/app/generate");
       expect(generateHits).toBe(2);
     } finally {
@@ -97,7 +98,7 @@ describe("runInference", () => {
             runners: [
               {
                 app: "storyboard/fal-flux-schnell",
-                url: `${req.url.origin}/apps/flux-a/session`,
+                url: `${req.url.origin}/apps/flux-a/app`,
                 mode: "single-shot",
                 runner_id: "bad",
                 price_info: { price: 1, currency: "usd", unit: "fixed" },
@@ -109,7 +110,7 @@ describe("runInference", () => {
             runners: [
               {
                 app: "storyboard/fal-flux-schnell",
-                url: `${req.url.origin}/apps/flux-b/session`,
+                url: `${req.url.origin}/apps/flux-b/app`,
                 mode: "single-shot",
                 runner_id: "good",
                 price_info: { price: 1, currency: "usd", unit: "fixed" },

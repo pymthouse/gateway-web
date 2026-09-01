@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LivepeerHTTPError } from "../src/errors.js";
+import { LivepeerGatewayError, LivepeerHTTPError } from "../src/errors.js";
 import { isRetryableRunnerFailure } from "../src/runner-failover.js";
 
 describe("runner-failover", () => {
@@ -8,5 +8,10 @@ describe("runner-failover", () => {
     expect(isRetryableRunnerFailure(new LivepeerHTTPError(502, "http://x"))).toBe(true);
     expect(isRetryableRunnerFailure(new LivepeerHTTPError(400, "http://x"))).toBe(false);
     expect(isRetryableRunnerFailure(new LivepeerHTTPError(401, "http://x"))).toBe(false);
+    expect(
+      isRetryableRunnerFailure(
+        new LivepeerGatewayError("runner session response missing control_url"),
+      ),
+    ).toBe(true);
   });
 });

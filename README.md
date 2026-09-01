@@ -1,12 +1,14 @@
 # @pymthouse/gateway-web
 
-Minimal Node.js client for Livepeer **live-runner** single-shot inference.
+Minimal Node.js client for Livepeer **live-runner** inference: single-shot HTTP calls and HTTP persistent sessions (`reserve` → `call` → `stop`).
 
-Ports the dispatch path that the Python SDK service uses for `POST /inference` → `call_runner`: discover runners, pick single-shot apps, pay a 402 challenge via a remote signer, and return the runner's JSON (with a media URL extracted).
+Ports the dispatch path that the Python SDK service uses: discover runners, pick by the **advertised** runner mode, pay a 402 challenge via a remote signer, and return the runner's JSON (with a media URL extracted). Persistent runners keep the discovery `/session` URL, reserve a session, POST `{app_url}{endpoint}`, then `POST {control_url}/stop`.
 
-**Orchestrator failover:** for each capability the gateway caches up to **5 distinct orchestrators** (one runner per orch, merit-ranked). On retryable runner failures (5xx, timeouts, exhausted payment retries on that orch) it automatically tries the next cached orchestrator before giving up.
+`runInference` considers both modes and dispatches per runner. Persistent apps need an explicit `endpoint` — it is not advertised and cannot be guessed from the app id.
 
-This package does **not** implement BYOC `/process/request/{cap}`, gRPC `GetOrchestrator`, protobuf, LV2V/trickle, or training.
+**Orchestrator failover:** for each capability the gateway caches up to **5 distinct orchestrators** (one runner per orch, merit-ranked). On retryable runner failures (5xx, timeouts, exhausted payment retries on that orch) it automatically tries the next cached orchestrator before giving up. Single-shot runners are tried first when an app is advertised under both modes.
+
+This package does **not** implement BYOC `/process/request/{cap}`, gRPC `GetOrchestrator`, protobuf, WebSocket, LV2V/trickle, or training.
 
 Published to the **`@pymthouse`** npm org (not `@livepeer` — no npm org access there).
 
@@ -36,14 +38,23 @@ const res = await gw.runInference({
   params: { prompt: "a dragon" },
 });
 
-console.log(res.url);
+console.log(res.url, res.mode);
+
+// Persistent HTTP apps: pass the app path. WebSocket / trickle apps are out of scope.
+const hello = await gw.runInference({
+  capability: "livepeer-example/hello-world",
+  endpoint: "/hello",
+  params: { name: "livepeer" },
+});
 ```
+
+`reserveSession` / `callSession` / `stopSession` are also on the gateway (and exported) for callers who want to hold a session across multiple HTTP calls.
 
 Mint the bearer the same way Console does (`mintUserSignerToken` via
 `@pymthouse/builder-sdk` + app signer routing). Do **not** point this package
 at `signer.daydream.live`.
 
-`callRunner` and `discoverRunners` are also exported for callers who want to drive the pieces directly.
+`callRunner`, `discoverRunners`, `reserveSession`, `callSession`, and `stopSession` are also exported for callers who want to drive the pieces directly.
 
 ## Smoke
 

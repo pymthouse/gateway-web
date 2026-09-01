@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  advertisedMode,
   endpointFor,
   instancesFromDiscovery,
   normalizeAppBase,
@@ -48,11 +49,19 @@ const ENTRIES: DiscoveryEntry[] = [
 ];
 
 describe("select", () => {
-  it("normalizeAppBase rewrites /session → /app", () => {
-    expect(normalizeAppBase("https://x/apps/flux/session")).toBe("https://x/apps/flux/app");
-    expect(normalizeAppBase("https://x/apps/flux/session/")).toBe("https://x/apps/flux/app");
+  it("advertisedMode treats empty and single_shot as single-shot", () => {
+    expect(advertisedMode("")).toBe("single-shot");
+    expect(advertisedMode("single_shot")).toBe("single-shot");
+    expect(advertisedMode("single-shot")).toBe("single-shot");
+    expect(advertisedMode("persistent")).toBe("persistent");
+    expect(advertisedMode("PERSISTENT")).toBe("persistent");
+  });
+
+  it("normalizeAppBase suffixes /app and leaves /session alone", () => {
+    expect(normalizeAppBase("https://x/apps/flux/session")).toBe("https://x/apps/flux/session/app");
     expect(normalizeAppBase("https://x/apps/flux")).toBe("https://x/apps/flux/app");
     expect(normalizeAppBase("https://x/apps/flux/app")).toBe("https://x/apps/flux/app");
+    expect(normalizeAppBase("https://x/apps/flux/app/")).toBe("https://x/apps/flux/app");
   });
 
   it("endpointFor prefers explicit, fal-* → /generate, image-generation → OpenAI images", () => {
@@ -217,6 +226,57 @@ describe("select", () => {
       "image-generation/black-forest-labs/FLUX.1-dev",
       "image-generation/stability/sdxl",
     ]);
+  });
+
+  it("pickRunners default modes skip persistent runners", () => {
+    const picked = pickRunners(ENTRIES, "storyboard/fal-flux-schnell", {
+      choose: (items) => items[0]!,
+    });
+    expect(picked.every((r) => r.mode !== "persistent")).toBe(true);
+    expect(picked.map((r) => r.runnerId)).not.toContain("r-persist");
+  });
+
+  it("pickRunners includes persistent when both modes are requested", () => {
+    const picked = pickRunners(
+      ENTRIES,
+      "storyboard/fal-flux-schnell",
+      { choose: (items) => items[0]!, modes: ["single-shot", "persistent"] },
+      5,
+    );
+    expect(picked.map((r) => r.runnerId)).toContain("r-persist");
+    expect(picked.filter((r) => r.mode !== "persistent").length).toBeGreaterThan(0);
+    const persistIdx = picked.findIndex((r) => r.mode === "persistent");
+    const singleIdx = picked.findIndex((r) => r.mode !== "persistent");
+    expect(singleIdx).toBeGreaterThanOrEqual(0);
+    expect(persistIdx).toBeGreaterThan(singleIdx);
+  });
+
+  it("mixed-mode app yields single-shot first", () => {
+    const mixed: DiscoveryEntry[] = [
+      entry("https://orch-persist:8936", [
+        {
+          app: "livepeer-example/hello-world",
+          url: "https://orch-persist:8936/apps/hello/session",
+          mode: "persistent",
+          runner_id: "persist",
+        },
+      ]),
+      entry("https://orch-shot:8936", [
+        {
+          app: "livepeer-example/hello-world",
+          url: "https://orch-shot:8936/apps/hello/app",
+          mode: "single-shot",
+          runner_id: "shot",
+        },
+      ]),
+    ];
+    const picked = pickRunners(
+      mixed,
+      "livepeer-example/hello-world",
+      { choose: (items) => items[0]!, modes: ["single-shot", "persistent"] },
+      5,
+    );
+    expect(picked.map((r) => r.runnerId)).toEqual(["shot", "persist"]);
   });
 
   it("pickInferencePool does not mix storyboard apps across capabilities", () => {

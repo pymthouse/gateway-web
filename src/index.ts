@@ -13,6 +13,7 @@ export { discoverRunners, defaultDiscoveryUrl } from "./discovery.js";
 export type { DiscoverRunnersOptions } from "./discovery.js";
 
 export {
+  advertisedMode,
   pickRunner,
   pickRunners,
   pickInferencePool,
@@ -23,7 +24,7 @@ export {
   instancesFromDiscovery,
   priceInfoFromJson,
 } from "./select.js";
-export type { MeritRank, PickRunnerOptions } from "./select.js";
+export type { MeritRank, PickRunnerOptions, RunnerMode } from "./select.js";
 
 export {
   DEFAULT_ORCH_CACHE_TTL_MS,
@@ -38,7 +39,23 @@ export { callRunner, runnerPaymentType, padRunnerPrice } from "./call-runner.js"
 export type { CallRunnerOptions, LiveRunnerCallResult } from "./call-runner.js";
 
 export { createGateway } from "./inference.js";
-export type { Gateway, GatewayConfig, InferenceRequest, InferenceResult } from "./inference.js";
+export type {
+  CallSessionRequest,
+  Gateway,
+  GatewayConfig,
+  InferenceRequest,
+  InferenceResult,
+  ReserveSessionRequest,
+} from "./inference.js";
+
+export { callSession, reserveSession, stopSession } from "./session.js";
+export type {
+  CallSessionOptions,
+  CallSessionResult,
+  ReserveSessionOptions,
+  RunnerSession,
+  StopSessionOptions,
+} from "./session.js";
 
 export { extractMediaUrl, mediaKind, capabilityMediaKind } from "./media-url.js";
 

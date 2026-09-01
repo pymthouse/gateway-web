@@ -11,13 +11,23 @@ import {
 } from "./orch-cache.js";
 import { isRetryableRunnerFailure, rejectionReason } from "./runner-failover.js";
 import {
+  advertisedMode,
   endpointFor,
   instancesFromDiscovery,
   normalizeAppBase,
   pickInferencePool,
+  pickRunners,
   resolveApp,
   type MeritRank,
+  type RunnerMode,
 } from "./select.js";
+import {
+  callSession as callRunnerSession,
+  reserveSession as reserveRunnerSession,
+  stopSession as stopRunnerSession,
+  type CallSessionResult,
+  type RunnerSession,
+} from "./session.js";
 import type { HeadersMap, LiveRunnerInstance } from "./types.js";
 
 export interface GatewayConfig {
@@ -58,15 +68,22 @@ export interface InferenceResult {
   orchestrator: string;
   runnerUrl: string;
   app: string;
+  mode: RunnerMode;
   elapsedMs: number;
   imageUrl: string | null;
   videoUrl: string | null;
   audioUrl: string | null;
 }
 
+function lastAppSegment(app: string): string {
+  const slash = app.lastIndexOf("/");
+  return slash >= 0 ? app.slice(slash + 1) : app;
+}
+
 function buildPayload(req: InferenceRequest): Record<string, unknown> {
   const payload: Record<string, unknown> = { ...req.params };
   const cap = req.capability.toLowerCase();
+  const appHint = (req.app ?? req.capability).toLowerCase();
   const isTts = ["tts", "chatterbox", "lux-tts", "speech"].some((k) => cap.includes(k));
   if (req.prompt && !("text" in payload) && !("prompt" in payload)) {
     if (isTts) payload.text = req.prompt;
@@ -80,6 +97,16 @@ function buildPayload(req: InferenceRequest): Record<string, unknown> {
   }
   const modelId = req.modelId ?? req.model_id;
   if (modelId) payload.model_id = modelId;
+
+  const isVllm = appHint.startsWith("vllm/") || lastAppSegment(appHint).startsWith("vllm");
+  if (isVllm && typeof payload.prompt === "string" && payload.messages == null) {
+    payload.messages = [{ role: "user", content: payload.prompt }];
+  }
+  const isImageGen =
+    appHint.startsWith("image-generation/") || appHint.includes("/image-generation/");
+  if (isImageGen && payload.size == null && (payload.width != null || payload.height != null)) {
+    payload.size = `${payload.width ?? 1024}x${payload.height ?? 1024}`;
+  }
   return payload;
 }
 
@@ -98,6 +125,7 @@ function buildInferenceResult(options: {
     orchestrator: options.runner.orchestratorUrl || "live-runner",
     runnerUrl: options.runnerUrl,
     app: options.runner.app,
+    mode: advertisedMode(options.runner.mode),
     elapsedMs: Date.now() - options.t0,
     imageUrl: kind === "image" ? url : null,
     videoUrl: kind === "video" ? url : null,
@@ -105,8 +133,23 @@ function buildInferenceResult(options: {
   };
 }
 
+export interface ReserveSessionRequest {
+  capability: string;
+  params?: Record<string, unknown>;
+  app?: string;
+}
+
+export interface CallSessionRequest {
+  endpoint: string;
+  payload?: Record<string, unknown>;
+  method?: string;
+}
+
 export interface Gateway {
   runInference(req: InferenceRequest): Promise<InferenceResult>;
+  reserveSession(req: ReserveSessionRequest): Promise<RunnerSession>;
+  callSession(handle: RunnerSession, req: CallSessionRequest): Promise<CallSessionResult>;
+  stopSession(handle: RunnerSession): Promise<void>;
 }
 
 export function createGateway(config: GatewayConfig): Gateway {
@@ -122,6 +165,68 @@ export function createGateway(config: GatewayConfig): Gateway {
   const orchestratorCacheTtlMs = config.orchestratorCacheTtlMs ?? DEFAULT_ORCH_CACHE_TTL_MS;
   const orchCache = new OrchestratorCache();
 
+  async function loadEntries(timeoutMs: number) {
+    return discoverRunners({
+      signerUrl: config.signerUrl,
+      signerHeaders: config.signerHeaders,
+      discoveryUrl: config.discoveryUrl,
+      timeoutMs: Math.min(timeoutMs, 15_000),
+      insecureTls,
+    });
+  }
+
+  async function runSingleShot(
+    runner: LiveRunnerInstance,
+    req: InferenceRequest,
+    payload: Record<string, unknown>,
+    timeoutMs: number,
+  ) {
+    const endpoint = endpointFor(runner.app, req.endpoint);
+    const runnerUrl = joinEndpoint(normalizeAppBase(runner.url), endpoint);
+    const result = await callRunner({
+      runnerUrl,
+      runner,
+      payload,
+      signerUrl: config.signerUrl,
+      signerHeaders: config.signerHeaders,
+      timeoutMs,
+      insecureTls,
+    });
+    return { runnerUrl, data: result.data };
+  }
+
+  async function runPersistent(
+    runner: LiveRunnerInstance,
+    req: InferenceRequest,
+    payload: Record<string, unknown>,
+    timeoutMs: number,
+  ) {
+    const session = await reserveRunnerSession({
+      runner,
+      payload,
+      signerUrl: config.signerUrl,
+      signerHeaders: config.signerHeaders,
+      timeoutMs,
+      insecureTls,
+    });
+    try {
+      const endpoint = req.endpoint?.trim() || endpointFor(runner.app);
+      const result = await callRunnerSession(session, {
+        endpoint,
+        payload,
+        timeoutMs,
+        insecureTls,
+      });
+      return { runnerUrl: result.runnerUrl, data: result.data };
+    } finally {
+      try {
+        await stopRunnerSession(session, { timeoutMs: 5_000, insecureTls });
+      } catch {
+        // Release is best-effort; do not hide the app call outcome.
+      }
+    }
+  }
+
   return {
     async runInference(req: InferenceRequest): Promise<InferenceResult> {
       const t0 = Date.now();
@@ -131,14 +236,7 @@ export function createGateway(config: GatewayConfig): Gateway {
       const timeoutMs =
         req.timeoutMs ?? (typeof req.timeout === "number" ? req.timeout * 1000 : defaultTimeoutMs);
 
-      const entries = await discoverRunners({
-        signerUrl: config.signerUrl,
-        signerHeaders: config.signerHeaders,
-        discoveryUrl: config.discoveryUrl,
-        timeoutMs: Math.min(timeoutMs, 15_000),
-        insecureTls,
-      });
-
+      const entries = await loadEntries(timeoutMs);
       const instances = instancesFromDiscovery(entries);
       const app = resolveApp(instances, req.capability, req.app);
       if (!app) {
@@ -157,11 +255,14 @@ export function createGateway(config: GatewayConfig): Gateway {
             admitted: config.admitted,
             meritRank: config.meritRank,
             capName: req.capability,
+            modes: ["single-shot", "persistent"],
           },
           maxOrchestrators,
         );
         if (runners.length === 0) {
-          throw new NoRunnerAvailableError(`no LR single-shot runner for app ${app} in discovery`);
+          throw new NoRunnerAvailableError(
+            `no LR runner for app ${app} in discovery (modes: single-shot, persistent)`,
+          );
         }
         orchCache.set(cacheKey, runners);
       }
@@ -171,29 +272,23 @@ export function createGateway(config: GatewayConfig): Gateway {
       let lastError: unknown;
 
       for (const runner of runners) {
-        const endpoint = endpointFor(runner.app, req.endpoint);
-        const runnerUrl = joinEndpoint(normalizeAppBase(runner.url), endpoint);
+        const mode = advertisedMode(runner.mode);
         try {
-          const result = await callRunner({
-            runnerUrl,
-            runner,
-            payload,
-            signerUrl: config.signerUrl,
-            signerHeaders: config.signerHeaders,
-            timeoutMs,
-            insecureTls,
-          });
+          const result =
+            mode === "persistent"
+              ? await runPersistent(runner, req, payload, timeoutMs)
+              : await runSingleShot(runner, req, payload, timeoutMs);
           return buildInferenceResult({
             req,
             runner,
-            runnerUrl,
+            runnerUrl: result.runnerUrl,
             data: result.data,
             t0,
           });
         } catch (e) {
           lastError = e;
           rejections.push({
-            url: runner.orchestratorUrl || runnerUrl,
+            url: runner.orchestratorUrl || runner.url,
             reason: rejectionReason(e),
           });
           if (!isRetryableRunnerFailure(e)) throw e;
@@ -206,6 +301,76 @@ export function createGateway(config: GatewayConfig): Gateway {
           (lastError instanceof Error ? `: ${lastError.message}` : ""),
         rejections,
       );
+    },
+
+    async reserveSession(req: ReserveSessionRequest): Promise<RunnerSession> {
+      if (!req.capability?.trim()) {
+        throw new LivepeerGatewayError("reserveSession requires capability");
+      }
+      const entries = await loadEntries(defaultTimeoutMs);
+      const instances = instancesFromDiscovery(entries);
+      const app = resolveApp(instances, req.capability, req.app);
+      if (!app) {
+        throw new NoRunnerAvailableError(
+          `No live-runner app matching capability ${JSON.stringify(req.capability)}`,
+        );
+      }
+      const runners = pickRunners(
+        entries,
+        app,
+        {
+          admitted: config.admitted,
+          meritRank: config.meritRank,
+          capName: req.capability,
+          modes: ["persistent"],
+        },
+        maxOrchestrators,
+      );
+      if (runners.length === 0) {
+        throw new NoRunnerAvailableError(
+          `no LR runner for app ${app} in discovery (modes: persistent)`,
+        );
+      }
+      const rejections: Array<{ url: string; reason: string }> = [];
+      let lastError: unknown;
+      for (const runner of runners) {
+        try {
+          return await reserveRunnerSession({
+            runner,
+            payload: req.params ?? {},
+            signerUrl: config.signerUrl,
+            signerHeaders: config.signerHeaders,
+            timeoutMs: defaultTimeoutMs,
+            insecureTls,
+          });
+        } catch (e) {
+          lastError = e;
+          rejections.push({
+            url: runner.orchestratorUrl || runner.url,
+            reason: rejectionReason(e),
+          });
+          if (!isRetryableRunnerFailure(e)) throw e;
+        }
+      }
+      throw new NoRunnerAvailableError(
+        `all ${runners.length} orchestrator(s) failed to reserve ${JSON.stringify(req.capability)}` +
+          (lastError instanceof Error ? `: ${lastError.message}` : ""),
+        rejections,
+      );
+    },
+
+    callSession(handle: RunnerSession, req: CallSessionRequest): Promise<CallSessionResult> {
+      return callRunnerSession(handle, {
+        endpoint: req.endpoint,
+        payload: req.payload,
+        method: req.method,
+        timeoutMs: defaultTimeoutMs,
+        insecureTls,
+      });
+    },
+
+    stopSession(handle: RunnerSession): Promise<void> {
+      return stopRunnerSession(handle, { timeoutMs: 5_000, insecureTls });
     },
   };
 }

@@ -4,11 +4,17 @@ import type { DiscoveryEntry, LiveRunnerInstance, LiveRunnerPriceInfo } from "./
 
 export type MeritRank = (capName: string, orchAddrs: string[]) => string[];
 
+export type RunnerMode = "single-shot" | "persistent";
+
+const DEFAULT_MODES: readonly RunnerMode[] = ["single-shot"];
+
 export interface PickRunnerOptions {
   admitted?: readonly string[] | null;
   meritRank?: MeritRank | null;
   capName?: string;
   choose?: <T>(items: T[]) => T;
+  /** Default `["single-shot"]` so existing callers do not reserve sessions. */
+  modes?: readonly RunnerMode[];
 }
 
 function stringValue(value: unknown): string {
@@ -52,10 +58,19 @@ export function instancesFromDiscovery(entries: DiscoveryEntry[]): LiveRunnerIns
   return candidates;
 }
 
-function isSingleShot(mode: string): boolean {
+/** Interpret the advertised runner mode. Empty / missing defaults to single-shot. */
+export function advertisedMode(mode: string): RunnerMode {
   const n = mode.replaceAll("_", "-").trim();
-  if (!n) return true;
-  return n === "single-shot";
+  if (!n || n === "single-shot") return "single-shot";
+  return "persistent";
+}
+
+function requestedModes(options: PickRunnerOptions): readonly RunnerMode[] {
+  return options.modes && options.modes.length > 0 ? options.modes : DEFAULT_MODES;
+}
+
+function modeAllowed(mode: string, modes: readonly RunnerMode[]): boolean {
+  return modes.includes(advertisedMode(mode));
 }
 
 function lastAppSegment(app: string): string {
@@ -119,11 +134,9 @@ export function endpointFor(app: string, endpoint?: string): string {
   return "/generate";
 }
 
+/** Suffix `/app` when the catalog published a bare runner base. Never rewrite `/session`. */
 export function normalizeAppBase(base: string): string {
   const trimmed = stripTrailingSlashes(base);
-  if (trimmed.endsWith("/session")) {
-    return `${trimmed.slice(0, -"/session".length)}/app`;
-  }
   if (!trimmed.endsWith("/app")) {
     return `${trimmed}/app`;
   }
@@ -140,15 +153,16 @@ function admitOrchestrator(addr: string, admitted: readonly string[] | null | un
   return admitted.some((a) => Boolean(a) && addr.includes(a));
 }
 
-function singleShotCandidates(
+function modeCandidates(
   entries: DiscoveryEntry[],
   appId: string,
   admitted: readonly string[] | null | undefined,
+  modes: readonly RunnerMode[],
 ): LiveRunnerInstance[] {
   return instancesFromDiscovery(entries).filter(
     (inst) =>
       inst.app === appId &&
-      isSingleShot(inst.mode) &&
+      modeAllowed(inst.mode, modes) &&
       inst.url &&
       admitOrchestrator(inst.orchestratorUrl, admitted),
   );
@@ -233,24 +247,14 @@ function pickOnePerOrchestrator(
   return picked;
 }
 
-/**
- * Up to `max` single-shot runners for `appId`.
- *
- * Prefers distinct orchestrator addresses (merit rank, then discovery order),
- * then fills remaining slots with other runner URLs for the same app — including
- * extra GPUs that share an orchestrator host.
- */
-export function pickRunners(
-  entries: DiscoveryEntry[],
-  appId: string,
-  options: PickRunnerOptions = {},
-  max = 5,
+function pickFromCandidates(
+  pairs: LiveRunnerInstance[],
+  options: PickRunnerOptions,
+  max: number,
 ): LiveRunnerInstance[] {
+  if (pairs.length === 0) return [];
   const choose = options.choose ?? defaultChoose;
   const limit = Math.max(1, max);
-  const pairs = singleShotCandidates(entries, appId, options.admitted);
-  if (pairs.length === 0) return [];
-
   const unique = uniqueByUrl(pairs);
   const byOrch = groupByOrchestrator(unique);
   const orchOrder = orderOrchestratorUrls([...byOrch.keys()], options.capName, options.meritRank);
@@ -261,6 +265,43 @@ export function pickRunners(
   return picked;
 }
 
+/**
+ * Up to `max` runners for `appId` in the requested modes (default single-shot).
+ *
+ * Prefers distinct orchestrator addresses (merit rank, then discovery order),
+ * then fills remaining slots with other runner URLs for the same app — including
+ * extra GPUs that share an orchestrator host. When both modes are requested,
+ * single-shot runners come first.
+ */
+export function pickRunners(
+  entries: DiscoveryEntry[],
+  appId: string,
+  options: PickRunnerOptions = {},
+  max = 5,
+): LiveRunnerInstance[] {
+  const modes = requestedModes(options);
+  const limit = Math.max(1, max);
+  if (modes.includes("single-shot") && modes.includes("persistent")) {
+    const single = pickFromCandidates(
+      modeCandidates(entries, appId, options.admitted, ["single-shot"]),
+      options,
+      limit,
+    );
+    if (single.length >= limit) return single;
+    const persist = pickFromCandidates(
+      modeCandidates(entries, appId, options.admitted, ["persistent"]),
+      options,
+      limit - single.length,
+    );
+    return [...single, ...persist];
+  }
+  return pickFromCandidates(
+    modeCandidates(entries, appId, options.admitted, modes),
+    options,
+    limit,
+  );
+}
+
 function isFamilyFailoverCandidate(
   inst: LiveRunnerInstance,
   appId: string,
@@ -268,11 +309,12 @@ function isFamilyFailoverCandidate(
   usedUrls: Set<string>,
   usedOrchs: Set<string>,
   admitted: readonly string[] | null | undefined,
+  modes: readonly RunnerMode[],
 ): boolean {
   return (
     inst.app !== appId &&
     inst.app.startsWith(`${family}/`) &&
-    isSingleShot(inst.mode) &&
+    modeAllowed(inst.mode, modes) &&
     Boolean(inst.url) &&
     admitOrchestrator(inst.orchestratorUrl, admitted) &&
     !usedUrls.has(inst.url) &&
@@ -280,8 +322,15 @@ function isFamilyFailoverCandidate(
   );
 }
 
+function familyModeOrder(modes: readonly RunnerMode[]): readonly RunnerMode[] {
+  if (modes.includes("single-shot") && modes.includes("persistent")) {
+    return ["single-shot", "persistent"];
+  }
+  return modes;
+}
+
 /**
- * Exact-app pool first, then other single-shot apps in the same family
+ * Exact-app pool first, then other apps in the same family
  * (`image-generation/…`) on orchestrators not already in the pool.
  */
 export function pickInferencePool(
@@ -291,6 +340,7 @@ export function pickInferencePool(
   max = 5,
 ): LiveRunnerInstance[] {
   const limit = Math.max(1, max);
+  const modes = requestedModes(options);
   const exact = pickRunners(entries, appId, options, limit);
   if (exact.length >= limit) return exact;
 
@@ -300,20 +350,27 @@ export function pickInferencePool(
   const usedUrls = new Set(exact.map((r) => r.url));
   const usedOrchs = new Set(exact.map((r) => r.orchestratorUrl).filter(Boolean));
   const extras: LiveRunnerInstance[] = [];
-  for (const inst of instancesFromDiscovery(entries)) {
-    if (extras.length + exact.length >= limit) break;
-    if (!isFamilyFailoverCandidate(inst, appId, family, usedUrls, usedOrchs, options.admitted)) {
-      continue;
+  const familyInstances = instancesFromDiscovery(entries);
+  for (const mode of familyModeOrder(modes)) {
+    for (const inst of familyInstances) {
+      if (extras.length + exact.length >= limit) break;
+      if (
+        !isFamilyFailoverCandidate(inst, appId, family, usedUrls, usedOrchs, options.admitted, [
+          mode,
+        ])
+      ) {
+        continue;
+      }
+      extras.push(inst);
+      usedUrls.add(inst.url);
+      if (inst.orchestratorUrl) usedOrchs.add(inst.orchestratorUrl);
     }
-    extras.push(inst);
-    usedUrls.add(inst.url);
-    if (inst.orchestratorUrl) usedOrchs.add(inst.orchestratorUrl);
   }
   return [...exact, ...extras];
 }
 
 /**
- * Pick ONE single-shot runner for `appId`, or null.
+ * Pick ONE runner for `appId` in the requested modes (default single-shot), or null.
  *
  * Port of simple-infra `lr_select.pick_base`: admit by orchestrator-address
  * substring, then optional merit ranking, then random among remaining.

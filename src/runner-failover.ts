@@ -13,6 +13,7 @@ export function isRetryableRunnerFailure(error: unknown): boolean {
     if (msg.includes("exhausted payment challenge retries")) return true;
     if (msg.includes("connection refused")) return true;
     if (msg.includes("failed to reach endpoint")) return true;
+    if (msg.includes("runner session response missing")) return true;
   }
   return false;
 }
