@@ -266,3 +266,24 @@ export function isJsonContentType(contentType: string): boolean {
   const subtype = slash >= 0 ? mime.slice(slash + 1) : mime;
   return subtype === "json" || subtype.endsWith("+json");
 }
+
+export function parseRunnerJsonBody(
+  body: Buffer,
+  runnerUrl: string,
+  contentType: string,
+): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body.toString("utf8")) as unknown;
+  } catch (e) {
+    throw new LivepeerGatewayError(
+      `HTTP JSON error: endpoint did not return valid JSON: ${e} (url=${runnerUrl}, content_type=${contentType})`,
+    );
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new LivepeerGatewayError(
+      `Live runner call expected JSON object, got ${Array.isArray(parsed) ? "array" : typeof parsed}`,
+    );
+  }
+  return parsed as Record<string, unknown>;
+}

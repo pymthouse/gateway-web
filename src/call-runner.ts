@@ -1,5 +1,5 @@
 import { LivepeerGatewayError, LivepeerHTTPError, SignerRefreshRequired } from "./errors.js";
-import { isJsonContentType, requestBody } from "./http.js";
+import { isJsonContentType, parseRunnerJsonBody, requestBody } from "./http.js";
 import { getSignerInfo, LivePaymentSession } from "./signer.js";
 import type {
   GetPaymentResponse,
@@ -140,42 +140,6 @@ async function getRunnerPayment(options: {
   return { session, payment };
 }
 
-function startFunding(paymentSession: LivePaymentSession): { cancel: () => Promise<void> } {
-  const ac = new AbortController();
-  const task = paymentSession.runPayments(ac.signal);
-  return {
-    cancel: async () => {
-      ac.abort();
-      try {
-        await task;
-      } catch {
-        // funding is best-effort; a cancel must not fail the runner call
-      }
-    },
-  };
-}
-
-function parseRunnerJsonBody(
-  body: Buffer,
-  runnerUrl: string,
-  contentType: string,
-): Record<string, unknown> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body.toString("utf8")) as unknown;
-  } catch (e) {
-    throw new LivepeerGatewayError(
-      `HTTP JSON error: endpoint did not return valid JSON: ${e} (url=${runnerUrl}, content_type=${contentType})`,
-    );
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new LivepeerGatewayError(
-      `Live runner call expected JSON object, got ${Array.isArray(parsed) ? "array" : typeof parsed}`,
-    );
-  }
-  return parsed as Record<string, unknown>;
-}
-
 async function resolveChallengePayment(options: {
   challenge: LivePaymentChallenge;
   paymentType: string;
@@ -259,7 +223,7 @@ async function attemptPaidCall(input: PaidAttemptInput): Promise<PaidAttemptResu
     }
   }
 
-  const funding = needsOngoingFunding && paymentSession ? startFunding(paymentSession) : null;
+  const funding = needsOngoingFunding && paymentSession ? paymentSession.startFunding() : null;
   try {
     const { body, contentType } = await requestBody(input.runnerUrl, {
       method: input.method,

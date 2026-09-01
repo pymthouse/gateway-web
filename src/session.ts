@@ -1,8 +1,13 @@
 import { callRunner } from "./call-runner.js";
 import { LivepeerGatewayError } from "./errors.js";
-import { isJsonContentType, joinEndpoint, postEmpty, requestBody } from "./http.js";
+import {
+  isJsonContentType,
+  joinEndpoint,
+  parseRunnerJsonBody,
+  postEmpty,
+  requestBody,
+} from "./http.js";
 import type { HeadersMap, LiveRunnerInstance } from "./types.js";
-import type { LivePaymentSession } from "./signer.js";
 
 export interface RunnerSession {
   sessionId: string;
@@ -48,42 +53,6 @@ function stringField(data: Record<string, unknown>, key: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function startFunding(paymentSession: LivePaymentSession): { cancel: () => Promise<void> } {
-  const ac = new AbortController();
-  const task = paymentSession.runPayments(ac.signal);
-  return {
-    cancel: async () => {
-      ac.abort();
-      try {
-        await task;
-      } catch {
-        // funding is best-effort; a cancel must not fail session cleanup
-      }
-    },
-  };
-}
-
-function parseRunnerJsonBody(
-  body: Buffer,
-  runnerUrl: string,
-  contentType: string,
-): Record<string, unknown> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body.toString("utf8")) as unknown;
-  } catch (e) {
-    throw new LivepeerGatewayError(
-      `HTTP JSON error: endpoint did not return valid JSON: ${e} (url=${runnerUrl}, content_type=${contentType})`,
-    );
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new LivepeerGatewayError(
-      `Live runner call expected JSON object, got ${Array.isArray(parsed) ? "array" : typeof parsed}`,
-    );
-  }
-  return parsed as Record<string, unknown>;
-}
-
 /**
  * POST the advertised runner URL unmodified (typically `…/session`) and keep
  * metered funding alive until `stopSession`.
@@ -116,7 +85,7 @@ export async function reserveSession(options: ReserveSessionOptions): Promise<Ru
     throw new LivepeerGatewayError("runner session response missing control_url");
   }
 
-  const funding = result.paymentSession ? startFunding(result.paymentSession) : null;
+  const funding = result.paymentSession ? result.paymentSession.startFunding() : null;
 
   return {
     sessionId,

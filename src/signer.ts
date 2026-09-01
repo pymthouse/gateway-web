@@ -170,6 +170,21 @@ export class LivePaymentSession {
     });
   }
 
+  startFunding(): { cancel: () => Promise<void> } {
+    const ac = new AbortController();
+    const task = this.runPayments(ac.signal);
+    return {
+      cancel: async () => {
+        ac.abort();
+        try {
+          await task;
+        } catch {
+          // funding is best-effort; a cancel must not fail the caller
+        }
+      },
+    };
+  }
+
   /**
    * Keep a metered session funded until `signal` aborts.
    * First payment waits one interval — the caller already paid upfront.
