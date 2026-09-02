@@ -7,6 +7,7 @@ import {
   postEmpty,
   requestBody,
 } from "./http.js";
+import type { LivePaymentSession } from "./signer.js";
 import type { HeadersMap, LiveRunnerInstance } from "./types.js";
 
 export interface RunnerSession {
@@ -16,6 +17,7 @@ export interface RunnerSession {
   controlUrl: string;
   runner: LiveRunnerInstance;
   released: boolean;
+  paymentSession: LivePaymentSession | null;
   stopPayments(): Promise<void>;
 }
 
@@ -26,6 +28,11 @@ export interface ReserveSessionOptions {
   signerHeaders?: HeadersMap;
   timeoutMs?: number;
   insecureTls?: boolean;
+  /**
+   * Start the 3s metered funding loop in this process (default true).
+   * Pass false to hand the payment session to another holder.
+   */
+  startFunding?: boolean;
 }
 
 export interface CallSessionOptions {
@@ -85,7 +92,10 @@ export async function reserveSession(options: ReserveSessionOptions): Promise<Ru
     throw new LivepeerGatewayError("runner session response missing control_url");
   }
 
-  const funding = result.paymentSession ? result.paymentSession.startFunding() : null;
+  const funding =
+    options.startFunding === false || !result.paymentSession
+      ? null
+      : result.paymentSession.startFunding();
 
   return {
     sessionId,
@@ -94,6 +104,7 @@ export async function reserveSession(options: ReserveSessionOptions): Promise<Ru
     controlUrl,
     runner: options.runner,
     released: false,
+    paymentSession: result.paymentSession,
     async stopPayments() {
       if (funding) await funding.cancel();
     },

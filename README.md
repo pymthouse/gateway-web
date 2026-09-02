@@ -4,11 +4,13 @@ Minimal Node.js client for Livepeer **live-runner** inference: single-shot HTTP 
 
 Ports the dispatch path that the Python SDK service uses: discover runners, pick by the **advertised** runner mode, pay a 402 challenge via a remote signer, and return the runner's JSON (with a media URL extracted). Persistent runners keep the discovery `/session` URL, reserve a session, POST `{app_url}{endpoint}`, then `POST {control_url}/stop`.
 
-`runInference` considers both modes and dispatches per runner. Persistent apps need an explicit `endpoint` — it is not advertised and cannot be guessed from the app id.
+`runInference` considers both modes and dispatches per runner. Persistent apps **must** pass `endpoint` — it is not advertised and cannot be guessed from the app id. Missing `endpoint` fails **before** reserve so you are not billed for a session that then 404s.
+
+`runInference` against a persistent runner is `reserve → one call → stop`. Each invocation pays a full reserve; the isolate cannot reuse the session across calls. Hold a session yourself with `reserveSession` / `callSession` / `stopSession` when you need more than one HTTP round-trip.
 
 **Orchestrator failover:** for each capability the gateway caches up to **5 distinct orchestrators** (one runner per orch, merit-ranked). On retryable runner failures (5xx, timeouts, exhausted payment retries on that orch) it automatically tries the next cached orchestrator before giving up. Single-shot runners are tried first when an app is advertised under both modes.
 
-This package does **not** implement BYOC `/process/request/{cap}`, gRPC `GetOrchestrator`, protobuf, WebSocket, LV2V/trickle, or training.
+This package does **not** implement BYOC `/process/request/{cap}`, gRPC `GetOrchestrator`, protobuf, WebSocket, LV2V/trickle, or training. See [docs/stream-session-handoff.md](docs/stream-session-handoff.md) for the streaming-handoff spike.
 
 Published to the **`@pymthouse`** npm org (not `@livepeer` — no npm org access there).
 
@@ -48,7 +50,7 @@ const hello = await gw.runInference({
 });
 ```
 
-`reserveSession` / `callSession` / `stopSession` are also on the gateway (and exported) for callers who want to hold a session across multiple HTTP calls.
+`reserveSession` / `callSession` / `stopSession` are also on the gateway (and exported) for callers who want to hold a session across multiple HTTP calls. Pass `startFunding: false` to reserve without starting the 3s payment loop; `paymentSession.snapshot()` / `LivePaymentSession.fromSnapshot()` move that loop to another process.
 
 Mint the bearer the same way Console does (`mintUserSignerToken` via
 `@pymthouse/builder-sdk` + app signer routing). Do **not** point this package

@@ -60,7 +60,7 @@ export type {
 export { extractMediaUrl, mediaKind, capabilityMediaKind } from "./media-url.js";
 
 export { getSignerInfo, LivePaymentSession, PAYMENT_INTERVAL_MS } from "./signer.js";
-export type { LivePaymentSessionOptions } from "./signer.js";
+export type { LivePaymentSessionOptions, PaymentSessionSnapshot } from "./signer.js";
 
 export { httpOrigin, joinEndpoint, parseHttpUrl } from "./http.js";
 

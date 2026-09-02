@@ -64,6 +64,7 @@ describe("session", () => {
       expect(handle.appUrl).toBe(`${server.origin}/apps/hello/app`);
       expect(handle.controlUrl).toBe(`${server.origin}/control/sess-1`);
       expect(handle.runnerUrl).toBe(`${server.origin}/apps/hello/session`);
+      expect(handle.paymentSession).toBeNull();
       await handle.stopPayments();
     } finally {
       clearSignerInfoCache();
@@ -478,4 +479,107 @@ describe("session", () => {
       await server.close();
     }
   });
+
+  it("runInference on a persistent-only app fails before reserve when endpoint is omitted", async () => {
+    const hits: string[] = [];
+    const server = await startMockServer((req, res) => {
+      if (req.pathname === "/discover-orchestrators") {
+        json(res, 200, [
+          {
+            address: req.url.origin,
+            runners: [
+              {
+                app: "livepeer-example/hello-world",
+                url: `${req.url.origin}/apps/hello/session`,
+                mode: "persistent",
+                runner_id: "hello",
+                price_info: { price: 1, currency: "usd", unit: "fixed" },
+              },
+            ],
+          },
+        ]);
+        return;
+      }
+      if (signerHandlers(req, res)) return;
+      if (req.pathname === "/apps/hello/session") {
+        hits.push("reserve");
+        json(res, 200, {
+          session_id: "sess-1",
+          app_url: `${req.url.origin}/apps/hello/app`,
+          control_url: `${req.url.origin}/control/sess-1`,
+        });
+        return;
+      }
+      json(res, 404, { error: { message: req.pathname } });
+    });
+    try {
+      clearSignerInfoCache();
+      const gw = createGateway({ signerUrl: server.origin, timeoutMs: 5_000 });
+      await expect(gw.runInference({ capability: "livepeer-example/hello-world" })).rejects.toThrow(
+        /requires endpoint for persistent app/,
+      );
+      expect(hits).toEqual([]);
+    } finally {
+      clearSignerInfoCache();
+      await server.close();
+    }
+  });
+
+  it("reserveSession startFunding:false does not send interval payments", async () => {
+    let payments = 0;
+    let sessionHits = 0;
+    const server = await startMockServer((req, res) => {
+      if (req.pathname === "/sign-orchestrator-info") {
+        json(res, 200, { address: "0xabc", signature: "0xsig" });
+        return;
+      }
+      if (req.pathname === "/generate-live-payment") {
+        payments += 1;
+        json(res, 200, { payment: "PAY", segCreds: "SEG", state: { n: payments } });
+        return;
+      }
+      if (req.pathname === "/pay") {
+        json(res, 200, {});
+        return;
+      }
+      if (req.pathname === "/apps/hello/session") {
+        sessionHits += 1;
+        if (sessionHits === 1) {
+          json(res, 402, {
+            payment_params: "p",
+            manifest_id: "m",
+            payment_url: `${req.url.origin}/pay`,
+          });
+          return;
+        }
+        json(res, 200, {
+          session_id: "sess-1",
+          app_url: `${req.url.origin}/apps/hello/app`,
+          control_url: `${req.url.origin}/control/sess-1`,
+        });
+        return;
+      }
+      json(res, 404, { error: { message: req.pathname } });
+    });
+    try {
+      clearSignerInfoCache();
+      const handle = await reserveSession({
+        runner: persistentRunner(server.origin),
+        signerUrl: server.origin,
+        startFunding: false,
+      });
+      expect(handle.paymentSession).not.toBeNull();
+      const snapshot = handle.paymentSession!.snapshot();
+      expect(snapshot.challenge.manifestId).toBe("m");
+      expect(snapshot.type).toBe("live");
+      const afterReserve = payments;
+      expect(afterReserve).toBeGreaterThanOrEqual(1);
+      await new Promise((resolve) => setTimeout(resolve, PAYMENT_INTERVAL_MS + 500));
+      expect(payments).toBe(afterReserve);
+      await handle.stopPayments();
+    } finally {
+      clearSignerInfoCache();
+      await server.close();
+    }
+  }, 15_000);
 });

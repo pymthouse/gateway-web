@@ -137,6 +137,8 @@ export interface ReserveSessionRequest {
   capability: string;
   params?: Record<string, unknown>;
   app?: string;
+  /** Default true. Pass false to hand payment state to another process. */
+  startFunding?: boolean;
 }
 
 export interface CallSessionRequest {
@@ -201,6 +203,12 @@ export function createGateway(config: GatewayConfig): Gateway {
     payload: Record<string, unknown>,
     timeoutMs: number,
   ) {
+    const endpoint = req.endpoint?.trim();
+    if (!endpoint) {
+      throw new LivepeerGatewayError(
+        `runInference requires endpoint for persistent app ${JSON.stringify(runner.app)}`,
+      );
+    }
     const session = await reserveRunnerSession({
       runner,
       payload,
@@ -210,7 +218,6 @@ export function createGateway(config: GatewayConfig): Gateway {
       insecureTls,
     });
     try {
-      const endpoint = req.endpoint?.trim() || endpointFor(runner.app);
       const result = await callRunnerSession(session, {
         endpoint,
         payload,
@@ -265,6 +272,13 @@ export function createGateway(config: GatewayConfig): Gateway {
           );
         }
         orchCache.set(cacheKey, runners);
+      }
+
+      const persistentOnly = runners.every((r) => advertisedMode(r.mode) === "persistent");
+      if (persistentOnly && !req.endpoint?.trim()) {
+        throw new LivepeerGatewayError(
+          `runInference requires endpoint for persistent app ${JSON.stringify(app)}`,
+        );
       }
 
       const payload = buildPayload(req);
@@ -342,6 +356,7 @@ export function createGateway(config: GatewayConfig): Gateway {
             signerHeaders: config.signerHeaders,
             timeoutMs: defaultTimeoutMs,
             insecureTls,
+            startFunding: req.startFunding,
           });
         } catch (e) {
           lastError = e;
