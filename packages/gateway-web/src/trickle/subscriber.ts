@@ -115,7 +115,7 @@ export class SegmentReader {
   async close(): Promise<void> {
     this.closed = true;
     this.eof = true;
-    if (this.iterator && this.iterator.return) {
+    if (this.iterator?.return) {
       try {
         await this.iterator.return();
       } catch {

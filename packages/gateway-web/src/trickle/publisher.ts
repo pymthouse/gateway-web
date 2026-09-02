@@ -18,13 +18,13 @@ export class TrickleSegmentWriteError extends TricklePublishError {
 
   constructor(
     message: string,
-    options: { seq: number; url?: string | null; status?: number | null } = { seq: -1 },
+    options?: { seq?: number; url?: string | null; status?: number | null },
   ) {
     super(message);
     this.name = "TrickleSegmentWriteError";
-    this.seq = options.seq;
-    this.url = options.url ?? null;
-    this.status = options.status ?? null;
+    this.seq = options?.seq ?? -1;
+    this.url = options?.url ?? null;
+    this.status = options?.status ?? null;
   }
 }
 
@@ -173,6 +173,55 @@ export class TricklePublisher {
     return state;
   }
 
+  private postHeaders(state: SegmentPostState): Record<string, string> {
+    const headers: Record<string, string> = { "Content-Type": this.mimeType };
+    if (state.sendReset) headers["Lp-Trickle-Reset"] = "1";
+    if (this.connectionClose) headers.Connection = "close";
+    return headers;
+  }
+
+  private async attemptPost(
+    url: string,
+    state: SegmentPostState,
+  ): Promise<{ ok: boolean; status: number | null; error: TrickleSegmentWriteError | null }> {
+    this.counts.postAttempts += 1;
+    state.queue.consumed = false;
+    try {
+      const res = await requestStream(url, {
+        method: "POST",
+        headers: this.postHeaders(state),
+        body: state.queue.iterate(),
+        insecureTls: this.insecureTls,
+        signal: state.abort.signal,
+      });
+      const body = await consumeStreamBody(res.body);
+      if (res.statusCode === 200) {
+        this.consecutiveFailures = 0;
+        this.counts.postSuccess += 1;
+        this.counts.segmentsCompleted += 1;
+        if (!state.queue.consumed) this.counts.emptySegmentsCompleted += 1;
+        return { ok: true, status: 200, error: null };
+      }
+      this.counts.postHttpFailures += 1;
+      return {
+        ok: false,
+        status: res.statusCode,
+        error: new TrickleSegmentWriteError(
+          `Trickle POST failed url=${url} status=${res.statusCode} body=${body.toString("utf8")}`,
+          { seq: state.seq, url, status: res.statusCode },
+        ),
+      };
+    } catch (e) {
+      this.counts.postExceptions += 1;
+      const err = new TrickleSegmentWriteError(`Trickle POST exception url=${url}`, {
+        seq: state.seq,
+        url,
+      });
+      err.cause = e;
+      return { ok: false, status: null, error: err };
+    }
+  }
+
   private async runPost(url: string, state: SegmentPostState): Promise<void> {
     if (this.closing || this.closed) return;
     let finalError: TrickleSegmentWriteError | null = null;
@@ -180,45 +229,11 @@ export class TricklePublisher {
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       if (this.closing || this.closed) return;
-      this.counts.postAttempts += 1;
-      state.queue.consumed = false;
-      const headers: Record<string, string> = { "Content-Type": this.mimeType };
-      if (state.sendReset) headers["Lp-Trickle-Reset"] = "1";
-      if (this.connectionClose) headers.Connection = "close";
-      try {
-        const res = await requestStream(url, {
-          method: "POST",
-          headers,
-          body: state.queue.iterate(),
-          insecureTls: this.insecureTls,
-          signal: state.abort.signal,
-        });
-        finalStatus = res.statusCode;
-        const body = await consumeStreamBody(res.body);
-        if (res.statusCode === 200) {
-          this.consecutiveFailures = 0;
-          this.counts.postSuccess += 1;
-          this.counts.segmentsCompleted += 1;
-          if (!state.queue.consumed) this.counts.emptySegmentsCompleted += 1;
-          return;
-        }
-        this.counts.postHttpFailures += 1;
-        finalError = new TrickleSegmentWriteError(
-          `Trickle POST failed url=${url} status=${res.statusCode} body=${body.toString("utf8")}`,
-          { seq: state.seq, url, status: res.statusCode },
-        );
-      } catch (e) {
-        if (this.closing || this.closed) return;
-        this.counts.postExceptions += 1;
-        const err = new TrickleSegmentWriteError(`Trickle POST exception url=${url}`, {
-          seq: state.seq,
-          url,
-        });
-        err.cause = e;
-        finalError = err;
-        finalStatus = null;
-      }
-
+      const result = await this.attemptPost(url, state);
+      if (this.closing || this.closed) return;
+      if (result.ok) return;
+      finalError = result.error;
+      finalStatus = result.status;
       if (finalStatus === 404) {
         this.counts.post404 += 1;
         break;
@@ -297,7 +312,7 @@ export class TricklePublisher {
         sendReset = true;
         this.seq = await this.resolveNextSeq();
       }
-      if (this.nextState === null || this.nextState.seq !== this.seq) {
+      if (this.nextState?.seq !== this.seq) {
         this.nextState = this.preconnect(this.seq, sendReset);
       }
       const state = this.nextState;
