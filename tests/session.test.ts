@@ -4,7 +4,7 @@ import { createGateway } from "../src/inference.js";
 import { callSession, reserveSession, stopSession } from "../src/session.js";
 import { clearSignerInfoCache, PAYMENT_INTERVAL_MS } from "../src/signer.js";
 import type { LiveRunnerInstance } from "../src/types.js";
-import { json, startMockServer } from "./mock-server.js";
+import { json, startMockServer, type MockRequest } from "./mock-server.js";
 
 function persistentRunner(
   origin: string,
@@ -34,6 +34,48 @@ function signerHandlers(req: { pathname: string }, res: Parameters<typeof json>[
   return false;
 }
 
+function persistentHelloCatalog(origin: string) {
+  return [
+    {
+      address: origin,
+      runners: [
+        {
+          app: "livepeer-example/hello-world",
+          url: `${origin}/apps/hello/session`,
+          mode: "persistent",
+          runner_id: "hello",
+          price_info: { price: 1, currency: "usd", unit: "fixed" },
+        },
+      ],
+    },
+  ];
+}
+
+function helloSessionBody(origin: string) {
+  return {
+    session_id: "sess-1",
+    app_url: `${origin}/apps/hello/app`,
+    control_url: `${origin}/control/sess-1`,
+  };
+}
+
+function handlePersistentHelloDiscover(req: MockRequest, res: Parameters<typeof json>[0]): boolean {
+  if (req.pathname !== "/discover-orchestrators") return false;
+  json(res, 200, persistentHelloCatalog(req.url.origin));
+  return true;
+}
+
+function handleHelloSessionOk(
+  req: MockRequest,
+  res: Parameters<typeof json>[0],
+  onHit?: () => void,
+): boolean {
+  if (req.pathname !== "/apps/hello/session") return false;
+  onHit?.();
+  json(res, 200, helloSessionBody(req.url.origin));
+  return true;
+}
+
 describe("session", () => {
   it("reserve POSTs the discovery URL unmodified and parses all three fields", async () => {
     const reserved: string[] = [];
@@ -41,11 +83,7 @@ describe("session", () => {
       if (signerHandlers(req, res)) return;
       if (req.pathname === "/apps/hello/session") {
         reserved.push(req.pathname);
-        json(res, 200, {
-          session_id: "sess-1",
-          app_url: `${req.url.origin}/apps/hello/app`,
-          control_url: `${req.url.origin}/control/sess-1`,
-        });
+        json(res, 200, helloSessionBody(req.url.origin));
         return;
       }
       json(res, 404, { error: { message: req.pathname } });
@@ -115,11 +153,7 @@ describe("session", () => {
           return;
         }
         expect(req.headers["livepeer-payment"]).toBe("PAY");
-        json(res, 200, {
-          session_id: "sess-1",
-          app_url: `${req.url.origin}/apps/hello/app`,
-          control_url: `${req.url.origin}/control/sess-1`,
-        });
+        json(res, 200, helloSessionBody(req.url.origin));
         return;
       }
       json(res, 404, { error: { message: req.pathname } });
@@ -146,11 +180,7 @@ describe("session", () => {
     const server = await startMockServer((req, res) => {
       if (signerHandlers(req, res)) return;
       if (req.pathname === "/apps/hello/session") {
-        json(res, 200, {
-          session_id: "sess-1",
-          app_url: `${req.url.origin}/apps/hello/app`,
-          control_url: `${req.url.origin}/control/sess-1`,
-        });
+        json(res, 200, helloSessionBody(req.url.origin));
         return;
       }
       if (req.pathname === "/control/sess-1/stop") {
@@ -184,11 +214,7 @@ describe("session", () => {
     const server = await startMockServer((req, res) => {
       if (signerHandlers(req, res)) return;
       if (req.pathname === "/apps/hello/session") {
-        json(res, 200, {
-          session_id: "sess-1",
-          app_url: `${req.url.origin}/apps/hello/app`,
-          control_url: `${req.url.origin}/control/sess-1`,
-        });
+        json(res, 200, helloSessionBody(req.url.origin));
         return;
       }
       if (req.pathname === "/apps/hello/app/hello") {
@@ -254,11 +280,7 @@ describe("session", () => {
           });
           return;
         }
-        json(res, 200, {
-          session_id: "sess-1",
-          app_url: `${req.url.origin}/apps/hello/app`,
-          control_url: `${req.url.origin}/control/sess-1`,
-        });
+        json(res, 200, helloSessionBody(req.url.origin));
         return;
       }
       if (req.pathname === "/control/sess-1/stop") {
@@ -291,33 +313,9 @@ describe("session", () => {
   it("runInference on a persistent-only app reserves, calls, and stops", async () => {
     const hits: string[] = [];
     const server = await startMockServer((req, res) => {
-      if (req.pathname === "/discover-orchestrators") {
-        json(res, 200, [
-          {
-            address: req.url.origin,
-            runners: [
-              {
-                app: "livepeer-example/hello-world",
-                url: `${req.url.origin}/apps/hello/session`,
-                mode: "persistent",
-                runner_id: "hello",
-                price_info: { price: 1, currency: "usd", unit: "fixed" },
-              },
-            ],
-          },
-        ]);
-        return;
-      }
+      if (handlePersistentHelloDiscover(req, res)) return;
       if (signerHandlers(req, res)) return;
-      if (req.pathname === "/apps/hello/session") {
-        hits.push("reserve");
-        json(res, 200, {
-          session_id: "sess-1",
-          app_url: `${req.url.origin}/apps/hello/app`,
-          control_url: `${req.url.origin}/control/sess-1`,
-        });
-        return;
-      }
+      if (handleHelloSessionOk(req, res, () => hits.push("reserve"))) return;
       if (req.pathname === "/apps/hello/app/hello") {
         hits.push("call");
         json(res, 200, { message: "Hello, livepeer!" });
@@ -350,33 +348,9 @@ describe("session", () => {
   it("runInference stops the session even when the app call throws", async () => {
     const hits: string[] = [];
     const server = await startMockServer((req, res) => {
-      if (req.pathname === "/discover-orchestrators") {
-        json(res, 200, [
-          {
-            address: req.url.origin,
-            runners: [
-              {
-                app: "livepeer-example/hello-world",
-                url: `${req.url.origin}/apps/hello/session`,
-                mode: "persistent",
-                runner_id: "hello",
-                price_info: { price: 1, currency: "usd", unit: "fixed" },
-              },
-            ],
-          },
-        ]);
-        return;
-      }
+      if (handlePersistentHelloDiscover(req, res)) return;
       if (signerHandlers(req, res)) return;
-      if (req.pathname === "/apps/hello/session") {
-        hits.push("reserve");
-        json(res, 200, {
-          session_id: "sess-1",
-          app_url: `${req.url.origin}/apps/hello/app`,
-          control_url: `${req.url.origin}/control/sess-1`,
-        });
-        return;
-      }
+      if (handleHelloSessionOk(req, res, () => hits.push("reserve"))) return;
       if (req.pathname === "/apps/hello/app/hello") {
         hits.push("call");
         json(res, 500, { error: "boom" });
@@ -445,11 +419,7 @@ describe("session", () => {
       }
       if (req.pathname === "/apps/hello/session") {
         hits.push("reserve");
-        json(res, 200, {
-          session_id: "sess-1",
-          app_url: `${req.url.origin}/apps/hello/app`,
-          control_url: `${req.url.origin}/control/sess-1`,
-        });
+        json(res, 200, helloSessionBody(req.url.origin));
         return;
       }
       if (req.pathname === "/apps/hello/app/hello") {
@@ -483,33 +453,9 @@ describe("session", () => {
   it("runInference on a persistent-only app fails before reserve when endpoint is omitted", async () => {
     const hits: string[] = [];
     const server = await startMockServer((req, res) => {
-      if (req.pathname === "/discover-orchestrators") {
-        json(res, 200, [
-          {
-            address: req.url.origin,
-            runners: [
-              {
-                app: "livepeer-example/hello-world",
-                url: `${req.url.origin}/apps/hello/session`,
-                mode: "persistent",
-                runner_id: "hello",
-                price_info: { price: 1, currency: "usd", unit: "fixed" },
-              },
-            ],
-          },
-        ]);
-        return;
-      }
+      if (handlePersistentHelloDiscover(req, res)) return;
       if (signerHandlers(req, res)) return;
-      if (req.pathname === "/apps/hello/session") {
-        hits.push("reserve");
-        json(res, 200, {
-          session_id: "sess-1",
-          app_url: `${req.url.origin}/apps/hello/app`,
-          control_url: `${req.url.origin}/control/sess-1`,
-        });
-        return;
-      }
+      if (handleHelloSessionOk(req, res, () => hits.push("reserve"))) return;
       json(res, 404, { error: { message: req.pathname } });
     });
     try {
@@ -552,11 +498,7 @@ describe("session", () => {
           });
           return;
         }
-        json(res, 200, {
-          session_id: "sess-1",
-          app_url: `${req.url.origin}/apps/hello/app`,
-          control_url: `${req.url.origin}/control/sess-1`,
-        });
+        json(res, 200, helloSessionBody(req.url.origin));
         return;
       }
       json(res, 404, { error: { message: req.pathname } });

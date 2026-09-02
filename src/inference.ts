@@ -80,6 +80,16 @@ function lastAppSegment(app: string): string {
   return slash >= 0 ? app.slice(slash + 1) : app;
 }
 
+function requirePersistentEndpoint(app: string, endpoint?: string): string {
+  const ep = endpoint?.trim();
+  if (!ep) {
+    throw new LivepeerGatewayError(
+      `runInference requires endpoint for persistent app ${JSON.stringify(app)}`,
+    );
+  }
+  return ep;
+}
+
 function buildPayload(req: InferenceRequest): Record<string, unknown> {
   const payload: Record<string, unknown> = { ...req.params };
   const cap = req.capability.toLowerCase();
@@ -177,6 +187,35 @@ export function createGateway(config: GatewayConfig): Gateway {
     });
   }
 
+  function cachedInferencePool(
+    entries: Awaited<ReturnType<typeof loadEntries>>,
+    app: string,
+    capability: string,
+  ): { cacheKey: string; runners: LiveRunnerInstance[] } {
+    const cacheKey = orchestratorCacheKey(capability, app);
+    let runners = orchCache.get(cacheKey, orchestratorCacheTtlMs);
+    if (!runners) {
+      runners = pickInferencePool(
+        entries,
+        app,
+        {
+          admitted: config.admitted,
+          meritRank: config.meritRank,
+          capName: capability,
+          modes: ["single-shot", "persistent"],
+        },
+        maxOrchestrators,
+      );
+      if (runners.length === 0) {
+        throw new NoRunnerAvailableError(
+          `no LR runner for app ${app} in discovery (modes: single-shot, persistent)`,
+        );
+      }
+      orchCache.set(cacheKey, runners);
+    }
+    return { cacheKey, runners };
+  }
+
   async function runSingleShot(
     runner: LiveRunnerInstance,
     req: InferenceRequest,
@@ -203,12 +242,7 @@ export function createGateway(config: GatewayConfig): Gateway {
     payload: Record<string, unknown>,
     timeoutMs: number,
   ) {
-    const endpoint = req.endpoint?.trim();
-    if (!endpoint) {
-      throw new LivepeerGatewayError(
-        `runInference requires endpoint for persistent app ${JSON.stringify(runner.app)}`,
-      );
-    }
+    const endpoint = requirePersistentEndpoint(runner.app, req.endpoint);
     const session = await reserveRunnerSession({
       runner,
       payload,
@@ -252,33 +286,9 @@ export function createGateway(config: GatewayConfig): Gateway {
         );
       }
 
-      const cacheKey = orchestratorCacheKey(req.capability, app);
-      let runners = orchCache.get(cacheKey, orchestratorCacheTtlMs);
-      if (!runners) {
-        runners = pickInferencePool(
-          entries,
-          app,
-          {
-            admitted: config.admitted,
-            meritRank: config.meritRank,
-            capName: req.capability,
-            modes: ["single-shot", "persistent"],
-          },
-          maxOrchestrators,
-        );
-        if (runners.length === 0) {
-          throw new NoRunnerAvailableError(
-            `no LR runner for app ${app} in discovery (modes: single-shot, persistent)`,
-          );
-        }
-        orchCache.set(cacheKey, runners);
-      }
-
-      const persistentOnly = runners.every((r) => advertisedMode(r.mode) === "persistent");
-      if (persistentOnly && !req.endpoint?.trim()) {
-        throw new LivepeerGatewayError(
-          `runInference requires endpoint for persistent app ${JSON.stringify(app)}`,
-        );
+      const { cacheKey, runners } = cachedInferencePool(entries, app, req.capability);
+      if (runners.every((r) => advertisedMode(r.mode) === "persistent")) {
+        requirePersistentEndpoint(app, req.endpoint);
       }
 
       const payload = buildPayload(req);

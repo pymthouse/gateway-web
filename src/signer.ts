@@ -122,7 +122,7 @@ export class LivePaymentSession {
   private readonly type: string;
   private challenge: LivePaymentChallenge;
   private readonly app: string | null;
-  private readonly maxPrice: Record<string, unknown> | null;
+  private readonly maxPrice: LiveRunnerPriceInfo | null;
   private readonly maxRefreshRetries: number;
   private state: Record<string, unknown> | null = null;
 
@@ -149,19 +149,11 @@ export class LivePaymentSession {
   }
 
   snapshot(): PaymentSessionSnapshot {
-    const maxPrice =
-      this.maxPrice === null
-        ? null
-        : {
-            price: this.maxPrice.price as number | string,
-            currency: String(this.maxPrice.currency ?? ""),
-            unit: String(this.maxPrice.unit ?? ""),
-          };
     return {
       type: this.type,
       challenge: { ...this.challenge },
       app: this.app,
-      maxPrice,
+      maxPrice: this.maxPrice === null ? null : { ...this.maxPrice },
       state: this.state === null ? null : { ...this.state },
     };
   }
