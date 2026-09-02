@@ -1,5 +1,9 @@
 import { PassThrough } from "node:stream";
-import { TrickleSubscriber, type TrickleSubscriberOptions } from "@pymthouse/gateway-web";
+import {
+  TrickleSubscriber,
+  type TrickleSubscriberOptions,
+  type TrickleSubscriberStats,
+} from "@pymthouse/gateway-web";
 import { loadNodeAv } from "./load-av.js";
 
 export interface DecodedVideoFrame {
@@ -24,7 +28,6 @@ export class MediaOutput {
   private subscriber: TrickleSubscriber | null = null;
   private running: Promise<void> | null = null;
   private closed = false;
-  private abort: AbortController | null = null;
 
   constructor(url: string, options: MediaOutputOptions = {}) {
     this.url = url;
@@ -38,13 +41,17 @@ export class MediaOutput {
 
   async close(): Promise<void> {
     this.closed = true;
-    this.abort?.abort();
     await this.subscriber?.close();
     try {
       await this.running;
     } catch {
       // ignore
     }
+  }
+
+  /** Transport counters, or null before `start()`. */
+  getStats(): TrickleSubscriberStats | null {
+    return this.subscriber?.getStats() ?? null;
   }
 
   async [Symbol.asyncDispose](): Promise<void> {

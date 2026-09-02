@@ -10,15 +10,13 @@ import { readFileSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import {
-  discoverRunners,
-  openStreamSession,
-  pickRunner,
-} from "@pymthouse/gateway-web";
+import { discoverRunners, openStreamSession, pickRunner } from "@pymthouse/gateway-web";
 import { MediaOutput, MediaPublish } from "../src/index.js";
+import { logStats, paceToFps, withDeadline } from "./verify-util.js";
 
 const require = createRequire(import.meta.url);
 const APP = "livepeer-example/flux-klein";
+const FPS = 8;
 
 function loadEnvFile(path: string): void {
   if (!existsSync(path)) return;
@@ -158,10 +156,24 @@ async function mintPymthouseSession(): Promise<{
   };
 }
 
-function yuv420p(width: number, height: number, y: number): Buffer {
-  const size = (width * height * 3) / 2;
-  const buf = Buffer.alloc(size, 128);
-  buf.fill(y, 0, width * height);
+/**
+ * Gradient plus a moving block. A flat luma plane encodes to almost nothing
+ * (avg QP 0, 100% intra 16x16) and gives an image model no signal to work with.
+ */
+function yuv420p(width: number, height: number, tick: number): Buffer {
+  const ySize = width * height;
+  const buf = Buffer.alloc(ySize + ySize / 2, 128);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      buf[y * width + x] = (x + y + tick * 8) & 0xff;
+    }
+  }
+  const box = Math.min(64, Math.floor(Math.min(width, height) / 4));
+  const bx = (tick * 11) % Math.max(1, width - box);
+  const by = (tick * 7) % Math.max(1, height - box);
+  for (let y = by; y < by + box; y += 1) {
+    buf.fill(235, y * width + bx, y * width + bx + box);
+  }
   return buf;
 }
 
@@ -174,7 +186,8 @@ async function main(): Promise<void> {
   const width = Number(process.env.FRAME_WIDTH ?? 64);
   const height = Number(process.env.FRAME_HEIGHT ?? 64);
   const prompt = process.env.PROMPT ?? "a red cube on a studio table, cinematic lighting";
-  const updatePrompt = process.env.UPDATE_PROMPT ?? "a blue sphere on a studio table, cinematic lighting";
+  const updatePrompt =
+    process.env.UPDATE_PROMPT ?? "a blue sphere on a studio table, cinematic lighting";
 
   const paid = Boolean(
     process.env.PYMTHOUSE_ISSUER_URL?.trim() && process.env.PYMTHOUSE_M2M_CLIENT_SECRET?.trim(),
@@ -227,13 +240,14 @@ async function main(): Promise<void> {
   const started = output.start();
 
   const pub = new MediaPublish(stream.channelUrl("in"), {
-    video: { fps: 8, keyframeIntervalS: 1 },
+    video: { fps: FPS, keyframeIntervalS: 1 },
     minSegmentWallclockS: 0.5,
     trickle: { insecureTls: true },
   });
 
   try {
     const mid = Math.max(1, Math.floor(frameCount / 2));
+    const publishStartedAt = Date.now();
     for (let i = 0; i < frameCount; i += 1) {
       if (i === mid) {
         console.log(`verify-flux-klein: POST /update prompt=${JSON.stringify(updatePrompt)}`);
@@ -244,13 +258,11 @@ async function main(): Promise<void> {
           insecureTls: true,
         });
       }
-      await pub.writeFrame({
-        width,
-        height,
-        data: yuv420p(width, height, 40 + (i % 8) * 20),
-      });
+      await pub.writeFrame({ width, height, data: yuv420p(width, height, i) });
+      await paceToFps(publishStartedAt, i, FPS);
     }
     await pub.close();
+    console.log(`verify-flux-klein: published ${JSON.stringify(pub.getStats())}`);
 
     const deadline = Date.now() + timeoutMs;
     while (bytes === 0 && Date.now() < deadline) {
@@ -261,8 +273,19 @@ async function main(): Promise<void> {
     }
     console.log(`verify-flux-klein OK  bytes=${bytes} frames=${frameCount}`);
   } finally {
-    await output.close();
-    await started.catch(() => undefined);
+    logStats("verify-flux-klein:", pub, output);
+    try {
+      await withDeadline(
+        "verify-flux-klein teardown",
+        20_000,
+        (async () => {
+          await output.close();
+          await started.catch(() => undefined);
+        })(),
+      );
+    } catch (e) {
+      console.error("verify-flux-klein:", e);
+    }
     await stream.stop().catch(() => undefined);
   }
 }

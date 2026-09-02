@@ -3,6 +3,7 @@ import {
   TricklePublisher,
   type SegmentWriter,
   type TricklePublisherOptions,
+  type TricklePublisherStats,
 } from "@pymthouse/gateway-web";
 import type { Encoder, Muxer } from "node-av/api";
 import type { Packet } from "node-av";
@@ -135,6 +136,11 @@ export class MediaPublish {
     }
     await this.publisher?.close();
     this.encoder?.close();
+  }
+
+  /** Transport counters, or null before the first frame is written. */
+  getStats(): TricklePublisherStats | null {
+    return this.publisher?.getStats() ?? null;
   }
 
   async [Symbol.asyncDispose](): Promise<void> {

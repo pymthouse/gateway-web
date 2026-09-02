@@ -1,3 +1,4 @@
+import type * as http from "node:http";
 import { describe, expect, it } from "vitest";
 import { TrickleSubscriber } from "../src/trickle/subscriber.js";
 import { json, startMockServer } from "./mock-server.js";
@@ -76,6 +77,31 @@ describe("TrickleSubscriber", () => {
       expect(hits).toContain("/chan/2");
     } finally {
       await sub.close();
+      await server.close();
+    }
+  });
+
+  it("close() cancels a long-polling GET instead of parking", async () => {
+    const held: http.ServerResponse[] = [];
+    // A channel with no data yet holds the GET open. Segments carry no
+    // headers/body timeout, so close() is the only way out.
+    const server = await startMockServer((_req, res) => {
+      held.push(res);
+    });
+    const sub = new TrickleSubscriber(`${server.origin}/chan`, { startSeq: 0 });
+    const pending = sub.next();
+    try {
+      while (held.length === 0) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      const outcome = await Promise.race([
+        sub.close().then(() => "closed" as const),
+        new Promise<"parked">((r) => setTimeout(() => r("parked"), 3_000)),
+      ]);
+      expect(outcome).toBe("closed");
+      await expect(pending).resolves.toBeNull();
+    } finally {
+      for (const res of held) res.destroy();
       await server.close();
     }
   });

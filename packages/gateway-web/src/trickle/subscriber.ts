@@ -1,6 +1,14 @@
-import { consumeStreamBody, headerValue, requestStream } from "../http.js";
+import { consumeStreamBody, headerValue, requestStream, type StreamResponse } from "../http.js";
 import type { HttpHeaderBag } from "../types.js";
 import { Mutex } from "./queue.js";
+
+/** Outcome of one trickle GET attempt. */
+type GetAttempt =
+  | { kind: "segment"; segment: SegmentReader }
+  | { kind: "eos" }
+  | { kind: "reset"; seq: number }
+  | { kind: "retry" }
+  | { kind: "aborted" };
 
 export interface TrickleSubscriberOptions {
   startSeq?: number;
@@ -148,6 +156,14 @@ export class TrickleSubscriber {
   private readonly maxBytes: number | null;
   private readonly insecureTls: boolean;
   private readonly lock = new Mutex();
+  /**
+   * Cancels the GET whose headers have not arrived yet. Trickle segments
+   * long-poll with no headers/body timeout, so without this a subscriber
+   * waiting on a channel that never produces data can never be torn down.
+   * Scoped to one attempt and cleared once headers land, so aborting never
+   * destroys the body of a segment already handed to the caller.
+   */
+  private inflight: AbortController | null = null;
   private pending: SegmentReader | null = null;
   private errored = false;
   private closing = false;
@@ -191,48 +207,75 @@ export class TrickleSubscriber {
     return Number.isFinite(n) ? n : current;
   }
 
+  /** Classify a GET that returned headers. Non-200 bodies are drained. */
+  private classifyGet(res: StreamResponse, seq: number): GetAttempt {
+    if (res.statusCode === 200) {
+      const segment = new SegmentReader(res.headers, res.body, { maxBytes: this.maxBytes });
+      return { kind: "segment", segment };
+    }
+    void consumeStreamBody(res.body);
+    if (res.statusCode === 404) {
+      this.counts.get404Eos += 1;
+      return { kind: "eos" };
+    }
+    if (res.statusCode === 470) {
+      this.counts.get470Reset += 1;
+      const latest = this.latestSeq(res.headers, seq);
+      this.counts.latestSeq = latest;
+      return { kind: "reset", seq: latest };
+    }
+    this.counts.getFailures += 1;
+    return { kind: "retry" };
+  }
+
+  private async attemptGet(seq: number, headers: Record<string, string>): Promise<GetAttempt> {
+    const started = Date.now();
+    this.counts.getAttempts += 1;
+    const abort = new AbortController();
+    this.inflight = abort;
+    try {
+      const res = await requestStream(this.segmentUrl(seq), {
+        method: "GET",
+        headers,
+        insecureTls: this.insecureTls,
+        signal: abort.signal,
+      });
+      this.inflight = null;
+      this.counts.waitMsTotal += Date.now() - started;
+      return this.classifyGet(res, seq);
+    } catch {
+      this.inflight = null;
+      this.counts.waitMsTotal += Date.now() - started;
+      // close() aborted us; this is teardown, not a transport failure.
+      if (this.closing || this.closed) return { kind: "aborted" };
+      this.counts.getFailures += 1;
+      return { kind: "retry" };
+    }
+  }
+
   private async preconnect(): Promise<SegmentReader | null> {
     if (this.closing || this.closed || this.errored) return null;
     let seq = this.seq;
-    let url = this.segmentUrl(seq);
     const headers: Record<string, string> = {};
     if (this.connectionClose) headers.Connection = "close";
 
     for (let attempt = 0; attempt < this.maxRetries; attempt += 1) {
       if (this.closing || this.closed || this.errored) return null;
-      const started = Date.now();
-      this.counts.getAttempts += 1;
-      try {
-        const res = await requestStream(url, {
-          method: "GET",
-          headers,
-          insecureTls: this.insecureTls,
-        });
-        this.counts.waitMsTotal += Date.now() - started;
-        if (res.statusCode === 200) {
-          return new SegmentReader(res.headers, res.body, { maxBytes: this.maxBytes });
-        }
-        if (res.statusCode === 404) {
-          this.counts.get404Eos += 1;
-          void consumeStreamBody(res.body);
+      const result = await this.attemptGet(seq, headers);
+      switch (result.kind) {
+        case "segment":
+          return result.segment;
+        case "aborted":
+          return null;
+        case "eos":
           this.errored = true;
           return null;
-        }
-        if (res.statusCode === 470) {
-          this.counts.get470Reset += 1;
-          const latest = this.latestSeq(res.headers, seq);
-          this.counts.latestSeq = latest;
-          void consumeStreamBody(res.body);
-          seq = latest;
+        case "reset":
+          seq = result.seq;
           this.seq = seq;
-          url = this.segmentUrl(seq);
           continue;
-        }
-        void consumeStreamBody(res.body);
-        this.counts.getFailures += 1;
-      } catch {
-        this.counts.waitMsTotal += Date.now() - started;
-        this.counts.getFailures += 1;
+        default:
+          break;
       }
       if (attempt < this.maxRetries - 1) {
         this.counts.getRetries += 1;
@@ -287,6 +330,8 @@ export class TrickleSubscriber {
     if (this.closed) return;
     this.closing = true;
     this.errored = true;
+    this.inflight?.abort();
+    this.inflight = null;
     await Promise.allSettled([this.prefetchTask]);
     if (this.pending) {
       await this.pending.close();

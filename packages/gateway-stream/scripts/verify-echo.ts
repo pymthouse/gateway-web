@@ -6,12 +6,9 @@
  * Discovers `livepeer-example/echo`, opens `/echo`, publishes synthetic 64x64
  * yuv420p frames onto `in`, and asserts MediaOutput receives bytes on `out`.
  */
-import {
-  discoverRunners,
-  openStreamSession,
-  pickRunner,
-} from "@pymthouse/gateway-web";
+import { discoverRunners, openStreamSession, pickRunner } from "@pymthouse/gateway-web";
 import { MediaOutput, MediaPublish } from "../src/index.js";
+import { logStats, withDeadline } from "./verify-util.js";
 
 const APP = "livepeer-example/echo";
 const WIDTH = 64;
@@ -90,8 +87,19 @@ async function main(): Promise<void> {
     }
     console.log(`verify-echo OK  bytes=${bytes} frames=${frameCount}`);
   } finally {
-    await output.close();
-    await started.catch(() => undefined);
+    logStats("verify-echo:", pub, output);
+    try {
+      await withDeadline(
+        "verify-echo teardown",
+        20_000,
+        (async () => {
+          await output.close();
+          await started.catch(() => undefined);
+        })(),
+      );
+    } catch (e) {
+      console.error("verify-echo:", e);
+    }
     await stream.stop().catch(() => undefined);
   }
 }
