@@ -49,7 +49,7 @@
     "@types/node": "^20.19.24",
     "tsup": "^8.5.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.2"
   },
   "keywords": [
