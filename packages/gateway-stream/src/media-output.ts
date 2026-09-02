@@ -13,6 +13,16 @@ export interface DecodedVideoFrame {
   data: Buffer;
 }
 
+/** The subset of node-av's `Frame` this module touches, kept structural so the
+ * node-av import stays lazy. */
+interface DecodedFrameHandle {
+  width: number;
+  height: number;
+  pts: bigint | number | null;
+  toBuffer: () => Buffer;
+  free: () => void;
+}
+
 export interface MediaOutputOptions extends TrickleSubscriberOptions {
   onBytes?: (chunk: Uint8Array) => void | Promise<void>;
   onFrame?: (frame: DecodedVideoFrame) => void | Promise<void>;
@@ -100,19 +110,27 @@ export class MediaOutput {
       }
       const frames = await decoder.decodeAll(packet);
       packet.free();
-      for (const frame of frames) {
-        try {
-          const data = frame.toBuffer();
-          await this.options.onFrame?.({
-            width: frame.width,
-            height: frame.height,
-            pts: Number(frame.pts),
-            data,
-          });
-        } finally {
-          frame.free();
-        }
-      }
+      for (const frame of frames) await this.emitFrame(frame);
+    }
+    // The decoder buffers frames and never drains on its own, so the tail is
+    // only reachable by flushing; a stream shorter than that buffer decodes to
+    // nothing at all without this.
+    for await (const frame of decoder.flushFrames()) {
+      await this.emitFrame(frame);
+    }
+  }
+
+  private async emitFrame(frame: DecodedFrameHandle): Promise<void> {
+    try {
+      const data = frame.toBuffer();
+      await this.options.onFrame?.({
+        width: frame.width,
+        height: frame.height,
+        pts: Number(frame.pts),
+        data,
+      });
+    } finally {
+      frame.free();
     }
   }
 }
