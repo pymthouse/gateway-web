@@ -1,5 +1,6 @@
 import { LivepeerGatewayError } from "../errors.js";
 import { consumeStreamBody, headerValue, requestBody, requestStream } from "../http.js";
+import { stripTrailingSlashes } from "../strings.js";
 import { ByteQueue, Mutex, QueueTimeoutError } from "./queue.js";
 
 const PUT_TIMEOUT_MS = 5_000;
@@ -115,7 +116,7 @@ export class TricklePublisher {
   };
 
   constructor(url: string, options: TricklePublisherOptions | string) {
-    this.url = url.replace(/\/+$/, "");
+    this.url = stripTrailingSlashes(url);
     if (typeof options === "string") {
       this.mimeType = options;
       this.seq = -1;

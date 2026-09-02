@@ -1,4 +1,5 @@
 import { consumeStreamBody, headerValue, requestStream, type StreamResponse } from "../http.js";
+import { stripTrailingSlashes } from "../strings.js";
 import type { HttpHeaderBag } from "../types.js";
 import { Mutex } from "./queue.js";
 
@@ -183,7 +184,7 @@ export class TrickleSubscriber {
   };
 
   constructor(url: string, options: TrickleSubscriberOptions = {}) {
-    this.baseUrl = url.replace(/\/+$/, "");
+    this.baseUrl = stripTrailingSlashes(url);
     this.seq = options.startSeq ?? -2;
     this.maxRetries = options.maxRetries ?? 5;
     this.connectionClose = options.connectionClose === true;
