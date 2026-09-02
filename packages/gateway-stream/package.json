@@ -1,6 +1,6 @@
 {
   "name": "@pymthouse/gateway-stream",
-  "version": "0.1.0",
+  "version": "0.1.0-rc.1",
   "description": "MPEG-TS media layer for @pymthouse/gateway-web trickle jobs: H.264 encode/decode via node-av.",
   "license": "MIT",
   "author": "PmtHouse",
@@ -37,7 +37,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@pymthouse/gateway-web": "^0.3.0",
+    "@pymthouse/gateway-web": "0.3.0-rc.1",
     "node-av": "^6.1.1"
   },
   "devDependencies": {
