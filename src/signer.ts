@@ -103,6 +103,17 @@ export interface LivePaymentSessionOptions {
   app?: string | null;
   maxPrice?: LiveRunnerPriceInfo | null;
   maxRefreshRetries?: number;
+  /** Restored ticket state from a previous isolate or process. */
+  state?: Record<string, unknown> | null;
+}
+
+/** Serializable payment loop — enough to resume `runPayments` elsewhere. */
+export interface PaymentSessionSnapshot {
+  type: string;
+  challenge: LivePaymentChallenge;
+  app: string | null;
+  maxPrice: LiveRunnerPriceInfo | null;
+  state: Record<string, unknown> | null;
 }
 
 export class LivePaymentSession {
@@ -111,7 +122,7 @@ export class LivePaymentSession {
   private readonly type: string;
   private challenge: LivePaymentChallenge;
   private readonly app: string | null;
-  private readonly maxPrice: Record<string, unknown> | null;
+  private readonly maxPrice: LiveRunnerPriceInfo | null;
   private readonly maxRefreshRetries: number;
   private state: Record<string, unknown> | null = null;
 
@@ -134,6 +145,35 @@ export class LivePaymentSession {
           }
         : null;
     this.maxRefreshRetries = Math.max(0, options.maxRefreshRetries ?? 3);
+    this.state = options.state ?? null;
+  }
+
+  snapshot(): PaymentSessionSnapshot {
+    return {
+      type: this.type,
+      challenge: { ...this.challenge },
+      app: this.app,
+      maxPrice: this.maxPrice === null ? null : { ...this.maxPrice },
+      state: this.state === null ? null : { ...this.state },
+    };
+  }
+
+  static fromSnapshot(options: {
+    signerUrl: string | null;
+    signerHeaders?: HeadersMap;
+    snapshot: PaymentSessionSnapshot;
+    maxRefreshRetries?: number;
+  }): LivePaymentSession {
+    return new LivePaymentSession({
+      signerUrl: options.signerUrl,
+      signerHeaders: options.signerHeaders,
+      type: options.snapshot.type,
+      challenge: options.snapshot.challenge,
+      app: options.snapshot.app,
+      maxPrice: options.snapshot.maxPrice,
+      maxRefreshRetries: options.maxRefreshRetries,
+      state: options.snapshot.state,
+    });
   }
 
   async getPayment(): Promise<GetPaymentResponse> {

@@ -91,6 +91,53 @@ describe("signer", () => {
     }
   });
 
+  it("snapshot round-trips state so fromSnapshot continues the payment sequence", async () => {
+    let payHits = 0;
+    const server = await startMockServer((req, res) => {
+      if (req.pathname === "/generate-live-payment") {
+        payHits += 1;
+        const body = req.json() as Record<string, unknown>;
+        if (payHits === 1) {
+          expect(body.state).toBeUndefined();
+          json(res, 200, { payment: "pay-1", segCreds: "seg-1", state: { n: 1 } });
+          return;
+        }
+        expect(body.state).toEqual({ n: 1 });
+        expect(body.orchestrator).toBe("params-1");
+        expect(body.app).toBe("livepeer-example/realtime-transcription");
+        json(res, 200, { payment: "pay-2", segCreds: "seg-2", state: { n: 2 } });
+        return;
+      }
+      json(res, 404, {});
+    });
+    try {
+      const first = new LivePaymentSession({
+        signerUrl: server.origin,
+        type: "live",
+        app: "livepeer-example/realtime-transcription",
+        maxPrice: { price: 0.01, currency: "usd", unit: "hour" },
+        challenge: {
+          paymentParams: "params-1",
+          manifestId: "man-1",
+          paymentUrl: `${server.origin}/pay`,
+        },
+      });
+      await first.getPayment();
+      const snap = first.snapshot();
+      expect(snap.state).toEqual({ n: 1 });
+      expect(snap.maxPrice).toEqual({ price: 0.01, currency: "usd", unit: "hour" });
+      const resumed = LivePaymentSession.fromSnapshot({
+        signerUrl: server.origin,
+        snapshot: JSON.parse(JSON.stringify(snap)) as typeof snap,
+      });
+      const second = await resumed.getPayment();
+      expect(second).toEqual({ payment: "pay-2", segCreds: "seg-2" });
+      expect(payHits).toBe(2);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("480 with no prior state is not retried", async () => {
     const server = await startMockServer((req, res) => {
       if (req.pathname === "/generate-live-payment") {
