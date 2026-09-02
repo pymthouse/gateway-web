@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  core:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -21,7 +21,25 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run lint
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
-      - run: npm pack --dry-run
+      - run: npm run typecheck --workspace @pymthouse/gateway-web
+      - run: npm test --workspace @pymthouse/gateway-web
+      - run: npm run build --workspace @pymthouse/gateway-web
+      - run: npm pack --dry-run --workspace @pymthouse/gateway-web
+
+  stream:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+      # node-av's native addon is a prebuilt platform optionalDependency, and its
+      # postinstall only fetches the standalone ffmpeg CLI, which this repo never
+      # shells out to — so the encode/decode path works without lifecycle scripts.
+      - run: npm ci --ignore-scripts
+      - run: npm run build --workspace @pymthouse/gateway-web
+      - run: npm run typecheck --workspace @pymthouse/gateway-stream
+      - run: npm test --workspace @pymthouse/gateway-stream
+      - run: npm run build --workspace @pymthouse/gateway-stream
+      - run: npm pack --dry-run --workspace @pymthouse/gateway-stream

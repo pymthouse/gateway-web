@@ -1,0 +1,70 @@
+{
+  "name": "@pymthouse/gateway-web",
+  "version": "0.3.0-rc.1",
+  "description": "Minimal Node.js Livepeer live-runner gateway: discovery, 402 payment handshake, single-shot inference, HTTP persistent sessions, and trickle publish/subscribe.",
+  "license": "MIT",
+  "author": "PmtHouse",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests scripts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "smoke": "tsx scripts/smoke.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
+  },
+  "dependencies": {
+    "undici": "^7.16.0"
+  },
+  "devDependencies": {
+    "@pymthouse/test-utils": "*",
+    "@types/node": "^20.19.24",
+    "tsup": "^8.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.2"
+  },
+  "keywords": [
+    "livepeer",
+    "ai",
+    "inference",
+    "live-runner"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pymthouse/gateway-web.git",
+    "directory": "packages/gateway-web"
+  },
+  "bugs": {
+    "url": "https://github.com/pymthouse/gateway-web/issues"
+  },
+  "homepage": "https://github.com/pymthouse/gateway-web#readme"
+}

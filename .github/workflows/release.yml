@@ -4,15 +4,20 @@
 # npm auth: Trusted Publishing (OIDC). Configure on npmjs.com for this repo and
 # workflow filename `release.yml`. Do not set secrets.NPM_TOKEN on publish — it
 # overrides OIDC and can cause EOTP. See docs/RELEASING.md.
+#
+# Tags:
+#   v*.*.*        → packages/gateway-web      (@pymthouse/gateway-web)
+#   stream-v*.*.* → packages/gateway-stream   (@pymthouse/gateway-stream)
 name: release
 on:
   push:
     tags:
       - "v*.*.*"
+      - "stream-v*.*.*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to publish (e.g. v0.1.0)"
+        description: "Existing tag to publish (e.g. v0.3.0 or stream-v0.1.0)"
         required: true
         type: string
 
@@ -34,10 +39,37 @@ jobs:
           # _authToken=${NODE_AUTH_TOKEN} into .npmrc and npm skips OIDC
           # (E404 / ENEEDAUTH). See npm/documentation#1960.
           package-manager-cache: false
-      - run: npm ci --ignore-scripts
-      - run: npm test
-      - run: npm run build
+      - name: Resolve package from tag
+        id: pkg
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}"
+          case "$TAG" in
+            stream-v*)
+              echo "dir=packages/gateway-stream" >> "$GITHUB_OUTPUT"
+              echo "workspace=@pymthouse/gateway-stream" >> "$GITHUB_OUTPUT"
+              ;;
+            v*)
+              echo "dir=packages/gateway-web" >> "$GITHUB_OUTPUT"
+              echo "workspace=@pymthouse/gateway-web" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::Tag ${TAG} does not match v*.*.* or stream-v*.*.*"
+              exit 1
+              ;;
+          esac
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+      - name: Install dependencies
+        # node-av's native addon arrives as a prebuilt platform optionalDependency,
+        # and its postinstall only downloads the standalone ffmpeg CLI, which this
+        # repo never shells out to. So no workspace needs lifecycle scripts.
+        run: npm ci --ignore-scripts
+      - name: Build core types for stream workspace
+        if: steps.pkg.outputs.workspace == '@pymthouse/gateway-stream'
+        run: npm run build --workspace @pymthouse/gateway-web
+      - run: npm test --workspace ${{ steps.pkg.outputs.workspace }}
+      - run: npm run build --workspace ${{ steps.pkg.outputs.workspace }}
       - name: Verify package.json repository matches this repo
+        working-directory: ${{ steps.pkg.outputs.dir }}
         run: |
           # Strip the optional `git+` prefix so both `https://…` and
           # `git+https://…` repository.url formats satisfy the provenance check.
@@ -50,6 +82,7 @@ jobs:
       - name: Install npm CLI for trusted publishing
         run: npm install -g npm@11.5.1 --ignore-scripts
       - name: Publish to npm via OIDC (trusted publishing)
+        working-directory: ${{ steps.pkg.outputs.dir }}
         # Use npm CLI (not yarn/pnpm publish): OIDC is implemented in npm.
         # Do not set NODE_AUTH_TOKEN / registry-url — those force classic auth
         # and skip trusted publishing. Provenance is automatic with OIDC.
@@ -75,8 +108,9 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+        working-directory: ${{ steps.pkg.outputs.dir }}
         run: |
-          TAG="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}"
+          TAG="${{ steps.pkg.outputs.tag }}"
           PKG=$(node -p "require('./package.json').name")
           VER=$(node -p "require('./package.json').version")
           if gh release view "${TAG}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then

@@ -1,48 +1,24 @@
 {
-  "name": "@pymthouse/gateway-web",
-  "version": "0.2.1",
-  "description": "Minimal Node.js Livepeer live-runner gateway: discovery, 402 payment handshake, single-shot inference, and HTTP persistent sessions.",
-  "license": "MIT",
-  "author": "PmtHouse",
-  "publishConfig": {
-    "access": "public"
-  },
+  "name": "gateway-web-monorepo",
+  "private": true,
   "type": "module",
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
-    }
-  },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
+  "workspaces": [
+    "packages/*"
   ],
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint src tests scripts",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:watch": "npm run test:watch --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint packages",
     "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "smoke": "tsx scripts/smoke.ts",
-    "prepublishOnly": "npm run build"
+    "format:check": "prettier --check ."
   },
   "engines": {
     "node": ">=20"
   },
   "overrides": {
     "esbuild": "^0.28.1"
-  },
-  "dependencies": {
-    "undici": "^7.16.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -54,19 +30,5 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.4",
     "vitest": "^4.1.2"
-  },
-  "keywords": [
-    "livepeer",
-    "ai",
-    "inference",
-    "live-runner"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/pymthouse/gateway-web.git"
-  },
-  "bugs": {
-    "url": "https://github.com/pymthouse/gateway-web/issues"
-  },
-  "homepage": "https://github.com/pymthouse/gateway-web#readme"
+  }
 }

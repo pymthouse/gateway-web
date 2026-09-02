@@ -4,7 +4,7 @@ import { createGateway } from "../src/inference.js";
 import { callSession, reserveSession, stopSession } from "../src/session.js";
 import { clearSignerInfoCache, PAYMENT_INTERVAL_MS } from "../src/signer.js";
 import type { LiveRunnerInstance } from "../src/types.js";
-import { json, startMockServer, type MockRequest } from "./mock-server.js";
+import { json, startMockServer, type MockRequest } from "@pymthouse/test-utils";
 
 function persistentRunner(
   origin: string,

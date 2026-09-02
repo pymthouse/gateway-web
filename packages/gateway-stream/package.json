@@ -1,0 +1,66 @@
+{
+  "name": "@pymthouse/gateway-stream",
+  "version": "0.1.0-rc.1",
+  "description": "MPEG-TS media layer for @pymthouse/gateway-web trickle jobs: H.264 encode/decode via node-av.",
+  "license": "MIT",
+  "author": "PmtHouse",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
+    "verify:echo": "tsx scripts/verify-echo.ts",
+    "verify:flux-klein": "tsx scripts/verify-flux-klein.ts",
+    "lint": "eslint src tests scripts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@pymthouse/gateway-web": "0.3.0-rc.1",
+    "node-av": "^6.1.1"
+  },
+  "devDependencies": {
+    "@pymthouse/test-utils": "*",
+    "@types/node": "^20.19.24",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.2",
+    "tsx": "^4.21.0"
+  },
+  "keywords": [
+    "livepeer",
+    "trickle",
+    "mpegts",
+    "ffmpeg"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pymthouse/gateway-web.git",
+    "directory": "packages/gateway-stream"
+  },
+  "bugs": {
+    "url": "https://github.com/pymthouse/gateway-web/issues"
+  },
+  "homepage": "https://github.com/pymthouse/gateway-web#readme"
+}

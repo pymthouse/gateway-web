@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { NoRunnerAvailableError } from "../src/errors.js";
 import { createGateway } from "../src/inference.js";
 import { clearSignerInfoCache } from "../src/signer.js";
-import { json, startMockServer } from "./mock-server.js";
+import { json, startMockServer } from "@pymthouse/test-utils";
 
 describe("runInference", () => {
   it("discovers, hits /app + /generate, pays 402, extracts media URL", async () => {
