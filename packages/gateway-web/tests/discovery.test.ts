@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { defaultDiscoveryUrl, discoverRunners } from "../src/discovery.js";
 import { RemoteSignerError } from "../src/errors.js";
-import { json, startMockServer } from "./mock-server.js";
+import { json, startMockServer } from "@pymthouse/test-utils";
 
 const RUNNERS = [
   {

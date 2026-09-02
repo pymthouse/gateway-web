@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import { Agent, request } from "undici";
 import {
   LivepeerGatewayError,
@@ -8,7 +9,7 @@ import {
 import { stripTrailingSlashes } from "./strings.js";
 import type { HeadersMap, HttpHeaderBag } from "./types.js";
 
-const USER_AGENT = "pymthouse-gateway-web/0.2.0";
+const USER_AGENT = "pymthouse-gateway-web/0.3.0-rc.2";
 const REFRESH_SESSION_ORCHESTRATOR_URL_HEADER = "Livepeer-Orchestrator-URL";
 
 let insecureAgent: Agent | undefined;
@@ -92,7 +93,7 @@ export function extractErrorMessageFromBody(body: string): string {
   return truncate(body);
 }
 
-function headerValue(headers: HttpHeaderBag, name: string): string | null {
+export function headerValue(headers: HttpHeaderBag, name: string): string | null {
   const needle = name.toLowerCase();
   for (const [key, value] of Object.entries(headers)) {
     if (key.toLowerCase() !== needle) continue;
@@ -179,6 +180,90 @@ function rethrowHttpFailure(e: unknown, url: string): never {
     );
   }
   throw new LivepeerGatewayError(`HTTP JSON error: unexpected error: ${name}: ${msg} (url=${url})`);
+}
+
+export type StreamRequestBody =
+  | string
+  | Buffer
+  | Uint8Array
+  | AsyncIterable<Buffer | Uint8Array | string>;
+
+export interface StreamRequestOptions {
+  method?: string;
+  headers?: HeadersMap;
+  body?: StreamRequestBody;
+  /** Skip TLS verification for this request. */
+  insecureTls?: boolean;
+  /**
+   * Undici headers timeout in ms. `0` means no timeout (required for trickle
+   * POST: the status line arrives after the streaming body ends).
+   */
+  headersTimeout?: number;
+  /**
+   * Undici body timeout in ms. `0` means no timeout (required for trickle GET
+   * segments that stay open while bytes arrive).
+   */
+  bodyTimeout?: number;
+  signal?: AbortSignal;
+}
+
+export interface StreamResponse {
+  statusCode: number;
+  url: string;
+  headers: HttpHeaderBag;
+  body: AsyncIterable<Buffer>;
+}
+
+/**
+ * Open an HTTP request and return the undici response without consuming the
+ * body or applying a wall-clock deadline. Trickle publish/subscribe uses this;
+ * `requestBody` still owns the JSON/inference path.
+ */
+
+function asUndiciBody(
+  body: StreamRequestBody | undefined,
+): string | Buffer | Uint8Array | Readable | undefined {
+  if (body === undefined) return undefined;
+  if (typeof body === "string" || Buffer.isBuffer(body) || body instanceof Uint8Array) {
+    return body;
+  }
+  return Readable.from(body);
+}
+
+export async function requestStream(
+  url: string,
+  options: StreamRequestOptions = {},
+): Promise<StreamResponse> {
+  const method = options.method?.toUpperCase() ?? (options.body !== undefined ? "POST" : "GET");
+  const headers: Record<string, string> = {
+    "User-Agent": USER_AGENT,
+  };
+  if (options.headers) Object.assign(headers, options.headers);
+  const parsed = parseHttpUrl(url);
+  const requestUrl = parsed.toString();
+  try {
+    const res = await request(requestUrl, {
+      method,
+      headers,
+      body: asUndiciBody(options.body),
+      dispatcher: dispatcherFor(options.insecureTls === true),
+      signal: options.signal,
+      headersTimeout: options.headersTimeout ?? 0,
+      bodyTimeout: options.bodyTimeout ?? 0,
+    });
+    return {
+      statusCode: res.statusCode,
+      url: requestUrl,
+      headers: res.headers as HttpHeaderBag,
+      body: res.body,
+    };
+  } catch (e) {
+    rethrowHttpFailure(e, requestUrl);
+  }
+}
+
+export async function consumeStreamBody(body: AsyncIterable<Buffer | string>): Promise<Buffer> {
+  return readResponseBody(body);
 }
 
 export async function requestBody(

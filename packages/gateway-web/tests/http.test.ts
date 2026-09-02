@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { LivepeerGatewayError, LivepeerHTTPError } from "../src/errors.js";
 import { getJson, httpOrigin, joinEndpoint, postJson } from "../src/http.js";
 import { stripTrailingSlashes } from "../src/strings.js";
-import { json, startMockServer } from "./mock-server.js";
+import { json, startMockServer } from "@pymthouse/test-utils";
 
 describe("http", () => {
   it("httpOrigin strips path", () => {
@@ -66,6 +66,23 @@ describe("http", () => {
     } catch (e) {
       expect(e).toBeInstanceOf(LivepeerGatewayError);
       expect((e as Error).message).toMatch(/did not return valid JSON/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("requestStream returns the body without a timeout", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "text/plain", "X-Seq": "7" });
+      res.end("stream-body");
+    });
+    try {
+      const { requestStream, consumeStreamBody, headerValue } = await import("../src/http.js");
+      const res = await requestStream(server.origin, { method: "GET" });
+      expect(res.statusCode).toBe(200);
+      expect(headerValue(res.headers, "X-Seq")).toBe("7");
+      const body = await consumeStreamBody(res.body);
+      expect(body.toString()).toBe("stream-body");
     } finally {
       await server.close();
     }
