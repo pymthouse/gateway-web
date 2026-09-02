@@ -1,6 +1,6 @@
 {
   "name": "@pymthouse/gateway-stream",
-  "version": "0.1.0-rc.2",
+  "version": "0.1.0-rc.3",
   "description": "MPEG-TS media layer for @pymthouse/gateway-web trickle jobs: H.264 encode/decode via node-av.",
   "license": "MIT",
   "author": "PmtHouse",
@@ -34,11 +34,11 @@
     "lint": "eslint src tests scripts"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.18"
   },
   "dependencies": {
     "@pymthouse/gateway-web": "0.3.0-rc.2",
-    "node-av": "^6.1.1"
+    "node-av": "^6.2.0-beta.21"
   },
   "devDependencies": {
     "@pymthouse/test-utils": "*",

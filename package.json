@@ -18,7 +18,8 @@
     "node": ">=20"
   },
   "overrides": {
-    "esbuild": "^0.28.1"
+    "esbuild": "^0.28.1",
+    "werift": "-"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
