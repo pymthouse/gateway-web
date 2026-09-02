@@ -70,4 +70,21 @@ describe("http", () => {
       await server.close();
     }
   });
+
+  it("requestStream returns the body without a timeout", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "text/plain", "X-Seq": "7" });
+      res.end("stream-body");
+    });
+    try {
+      const { requestStream, consumeStreamBody, headerValue } = await import("../src/http.js");
+      const res = await requestStream(server.origin, { method: "GET" });
+      expect(res.statusCode).toBe(200);
+      expect(headerValue(res.headers, "X-Seq")).toBe("7");
+      const body = await consumeStreamBody(res.body);
+      expect(body.toString()).toBe("stream-body");
+    } finally {
+      await server.close();
+    }
+  });
 });

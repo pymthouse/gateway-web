@@ -1,7 +1,7 @@
 {
-  "name": "@pymthouse/gateway-web",
-  "version": "0.3.0",
-  "description": "Minimal Node.js Livepeer live-runner gateway: discovery, 402 payment handshake, single-shot inference, HTTP persistent sessions, and trickle publish/subscribe.",
+  "name": "@pymthouse/gateway-stream",
+  "version": "0.1.0",
+  "description": "MPEG-TS media layer for @pymthouse/gateway-web trickle jobs: H.264 encode/decode via node-av.",
   "license": "MIT",
   "author": "PmtHouse",
   "publishConfig": {
@@ -25,42 +25,38 @@
   ],
   "scripts": {
     "build": "tsup",
-    "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src tests scripts",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "smoke": "tsx scripts/smoke.ts",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "verify:echo": "tsx scripts/verify-echo.ts",
+    "verify:flux-klein": "tsx scripts/verify-flux-klein.ts",
+    "lint": "eslint src tests scripts"
   },
   "engines": {
     "node": ">=20"
   },
-  "overrides": {
-    "esbuild": "^0.28.1"
-  },
   "dependencies": {
-    "undici": "^7.16.0"
+    "@pymthouse/gateway-web": "^0.3.0",
+    "node-av": "^6.1.1"
   },
   "devDependencies": {
     "@types/node": "^20.19.24",
     "tsup": "^8.5.0",
-    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.2"
+    "vitest": "^4.1.2",
+    "tsx": "^4.21.0"
   },
   "keywords": [
     "livepeer",
-    "ai",
-    "inference",
-    "live-runner"
+    "trickle",
+    "mpegts",
+    "ffmpeg"
   ],
   "repository": {
     "type": "git",
     "url": "https://github.com/pymthouse/gateway-web.git",
-    "directory": "packages/gateway-web"
+    "directory": "packages/gateway-stream"
   },
   "bugs": {
     "url": "https://github.com/pymthouse/gateway-web/issues"

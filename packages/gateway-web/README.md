@@ -1,8 +1,10 @@
 # @pymthouse/gateway-web
 
-Minimal Node.js client for Livepeer **live-runner** inference: single-shot HTTP calls and HTTP persistent sessions (`reserve` → `call` → `stop`).
+Minimal Node.js client for Livepeer **live-runner** inference: single-shot HTTP calls, HTTP persistent sessions (`reserve` → `call` → `stop`), and **trickle** publish/subscribe.
 
 Ports the dispatch path that the Python SDK service uses: discover runners, pick by the **advertised** runner mode, pay a 402 challenge via a remote signer, and return the runner's JSON (with a media URL extracted). Persistent runners keep the discovery `/session` URL, reserve a session, POST `{app_url}{endpoint}`, then `POST {control_url}/stop`.
+
+Trickle jobs use `openStreamSession` (reserve with `startFunding: false`, POST the app stream path, parse channel URLs) plus `TricklePublisher` / `TrickleSubscriber`. MPEG-TS frame encode/decode lives in `@pymthouse/gateway-stream`.
 
 `runInference` considers both modes and dispatches per runner. Persistent apps **must** pass `endpoint` — it is not advertised and cannot be guessed from the app id. Missing `endpoint` fails **before** reserve so you are not billed for a session that then 404s.
 
@@ -10,7 +12,7 @@ Ports the dispatch path that the Python SDK service uses: discover runners, pick
 
 **Orchestrator failover:** for each capability the gateway caches up to **5 distinct orchestrators** (one runner per orch, merit-ranked). On retryable runner failures (5xx, timeouts, exhausted payment retries on that orch) it automatically tries the next cached orchestrator before giving up. Single-shot runners are tried first when an app is advertised under both modes.
 
-This package does **not** implement BYOC `/process/request/{cap}`, gRPC `GetOrchestrator`, protobuf, WebSocket, LV2V/trickle, or training. See [docs/stream-session-handoff.md](docs/stream-session-handoff.md) for the streaming-handoff spike.
+This package does **not** implement BYOC `/process/request/{cap}`, gRPC `GetOrchestrator`, protobuf, WebSocket, LV2V, or training. See [docs/stream-session-handoff.md](../../docs/stream-session-handoff.md) for the streaming-handoff spike.
 
 Published to the **`@pymthouse`** npm org (not `@livepeer` — no npm org access there).
 
@@ -42,7 +44,7 @@ const res = await gw.runInference({
 
 console.log(res.url, res.mode);
 
-// Persistent HTTP apps: pass the app path. WebSocket / trickle apps are out of scope.
+// Persistent HTTP apps: pass the app path.
 const hello = await gw.runInference({
   capability: "livepeer-example/hello-world",
   endpoint: "/hello",
@@ -56,7 +58,9 @@ Mint the bearer the same way Console does (`mintUserSignerToken` via
 `@pymthouse/builder-sdk` + app signer routing). Do **not** point this package
 at `signer.daydream.live`.
 
-`callRunner`, `discoverRunners`, `reserveSession`, `callSession`, and `stopSession` are also exported for callers who want to drive the pieces directly.
+`callRunner`, `discoverRunners`, `reserveSession`, `callSession`, `stopSession`, `openStreamSession`, `TricklePublisher`, and `TrickleSubscriber` are also exported for callers who want to drive the pieces directly.
+
+Frame encode/decode (H.264 / MPEG-TS) is `@pymthouse/gateway-stream`.
 
 ## Smoke
 
@@ -82,4 +86,4 @@ Storyboard depends on this package from npm (`@pymthouse/gateway-web`). It route
 ## Releasing
 
 CI runs lint, typecheck, tests, and a pack dry-run on every PR and push to `main`.
-Pushing a `v*.*.*` tag publishes to npm via trusted publishing and creates a GitHub Release. See [docs/RELEASING.md](docs/RELEASING.md).
+Pushing a `v*.*.*` tag publishes to npm via trusted publishing and creates a GitHub Release. See [docs/RELEASING.md](../../docs/RELEASING.md).

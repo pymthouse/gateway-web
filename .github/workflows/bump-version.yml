@@ -3,6 +3,14 @@ name: bump-version
 on:
   workflow_dispatch:
     inputs:
+      package:
+        description: Package to bump (`gateway-web` tags vX; `gateway-stream` tags stream-vX)
+        required: true
+        default: gateway-web
+        type: choice
+        options:
+          - gateway-web
+          - gateway-stream
       version:
         description: >
           Semver bump keyword (patch, minor, major, prerelease, …) or an exact
@@ -24,9 +32,18 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci --ignore-scripts
-      - run: npm test
-      - run: npm run build
+      - name: Install dependencies
+        run: |
+          if [ "${{ inputs.package }}" = "gateway-stream" ]; then
+            npm ci
+          else
+            npm ci --ignore-scripts
+          fi
+      - name: Build core types for stream workspace
+        if: inputs.package == 'gateway-stream'
+        run: npm run build --workspace @pymthouse/gateway-web
+      - run: npm test --workspace @pymthouse/${{ inputs.package }}
+      - run: npm run build --workspace @pymthouse/${{ inputs.package }}
       - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
@@ -34,8 +51,19 @@ jobs:
       - name: Bump package version
         env:
           VERSION_BUMP: ${{ inputs.version }}
+          PKG: ${{ inputs.package }}
         run: |
-          npm version "$VERSION_BUMP" -m "chore: release v%s"
+          npm version "$VERSION_BUMP" --workspace "@pymthouse/${PKG}" --no-git-tag-version
+          VERSION=$(node -p "require('./packages/${PKG}/package.json').version")
+          if [ "$PKG" = "gateway-stream" ]; then
+            TAG="stream-v${VERSION}"
+          else
+            TAG="v${VERSION}"
+          fi
+          git add "packages/${PKG}/package.json" package-lock.json
+          git commit -m "chore: release ${TAG}"
+          git tag "$TAG"
+          echo "Created ${TAG}"
       - name: Push branch and tag
         run: |
           git push origin "HEAD:${{ github.ref_name }}"

@@ -1,0 +1,111 @@
+import { PassThrough } from "node:stream";
+import { TrickleSubscriber, type TrickleSubscriberOptions } from "@pymthouse/gateway-web";
+import { loadNodeAv } from "./load-av.js";
+
+export interface DecodedVideoFrame {
+  width: number;
+  height: number;
+  pts: number | null;
+  data: Buffer;
+}
+
+export interface MediaOutputOptions extends TrickleSubscriberOptions {
+  onBytes?: (chunk: Uint8Array) => void | Promise<void>;
+  onFrame?: (frame: DecodedVideoFrame) => void | Promise<void>;
+}
+
+/**
+ * Subscribe to a trickle MPEG-TS channel. `onBytes` sees raw TS chunks;
+ * `onFrame` decodes video frames via node-av.
+ */
+export class MediaOutput {
+  readonly url: string;
+  private readonly options: MediaOutputOptions;
+  private subscriber: TrickleSubscriber | null = null;
+  private running: Promise<void> | null = null;
+  private closed = false;
+  private abort: AbortController | null = null;
+
+  constructor(url: string, options: MediaOutputOptions = {}) {
+    this.url = url;
+    this.options = options;
+  }
+
+  start(): Promise<void> {
+    this.running ??= this.run();
+    return this.running;
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    this.abort?.abort();
+    await this.subscriber?.close();
+    try {
+      await this.running;
+    } catch {
+      // ignore
+    }
+  }
+
+  async [Symbol.asyncDispose](): Promise<void> {
+    await this.close();
+  }
+
+  private async run(): Promise<void> {
+    this.subscriber = new TrickleSubscriber(this.url, this.options);
+    const decode = this.options.onFrame !== undefined;
+    let ts: PassThrough | null = null;
+    let decodeTask: Promise<void> | null = null;
+    if (decode) {
+      ts = new PassThrough();
+      decodeTask = this.decodeLoop(ts);
+    }
+    try {
+      for (;;) {
+        if (this.closed) break;
+        const segment = await this.subscriber.next();
+        if (segment === null) break;
+        for await (const chunk of segment) {
+          if (this.options.onBytes) await this.options.onBytes(chunk);
+          if (ts && !ts.destroyed) ts.write(chunk);
+        }
+        await segment.close();
+      }
+    } finally {
+      ts?.end();
+      await decodeTask;
+      await this.subscriber.close();
+    }
+  }
+
+  private async decodeLoop(ts: PassThrough): Promise<void> {
+    const av = await loadNodeAv();
+    await using demuxer = await av.api.Demuxer.open(ts, { format: "mpegts" });
+    const video = demuxer.video();
+    if (!video) return;
+    using decoder = await av.api.Decoder.create(video);
+    for await (const packet of demuxer.packets()) {
+      if (this.closed) break;
+      if (!packet) continue;
+      if (packet.streamIndex !== video.index) {
+        packet.free();
+        continue;
+      }
+      const frames = await decoder.decodeAll(packet);
+      packet.free();
+      for (const frame of frames) {
+        try {
+          const data = frame.toBuffer();
+          await this.options.onFrame?.({
+            width: frame.width,
+            height: frame.height,
+            pts: Number(frame.pts),
+            data,
+          });
+        } finally {
+          frame.free();
+        }
+      }
+    }
+  }
+}
