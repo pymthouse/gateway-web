@@ -62,7 +62,42 @@ export { extractMediaUrl, mediaKind, capabilityMediaKind } from "./media-url.js"
 export { getSignerInfo, LivePaymentSession, PAYMENT_INTERVAL_MS } from "./signer.js";
 export type { LivePaymentSessionOptions, PaymentSessionSnapshot } from "./signer.js";
 
-export { httpOrigin, joinEndpoint, parseHttpUrl } from "./http.js";
+export {
+  httpOrigin,
+  joinEndpoint,
+  parseHttpUrl,
+  requestStream,
+  consumeStreamBody,
+  headerValue,
+} from "./http.js";
+export type { StreamRequestOptions, StreamResponse } from "./http.js";
+
+export {
+  TricklePublisher,
+  TricklePublishError,
+  TrickleSegmentWriteError,
+  TricklePublisherTerminalError,
+  SegmentWriter,
+} from "./trickle/publisher.js";
+export type { TricklePublisherOptions, TricklePublisherStats } from "./trickle/publisher.js";
+
+export { TrickleSubscriber, SegmentReader } from "./trickle/subscriber.js";
+export type {
+  TrickleSubscriberOptions,
+  TrickleSubscriberStats,
+  SegmentReaderStats,
+} from "./trickle/subscriber.js";
+
+export { parseTrickleChannels, channelUrl } from "./trickle/channels.js";
+export type { TrickleChannel } from "./trickle/channels.js";
+
+export { openStreamSession, resumeStreamSession, streamAppUrl } from "./stream-session.js";
+export type {
+  OpenStreamSessionOptions,
+  ResumeStreamSessionOptions,
+  StreamSession,
+  StreamSessionSnapshot,
+} from "./stream-session.js";
 
 export type {
   DiscoveryEntry,

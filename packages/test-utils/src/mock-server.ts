@@ -7,6 +7,7 @@ export interface MockRequest {
   pathname: string;
   headers: http.IncomingHttpHeaders;
   body: string;
+  bodyBuf: Buffer;
   json: () => unknown;
 }
 
@@ -37,7 +38,8 @@ export async function startMockServer(handler: MockHandler): Promise<MockServer>
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
     req.on("end", () => {
-      const body = Buffer.concat(chunks).toString("utf8");
+      const bodyBuf = Buffer.concat(chunks);
+      const body = bodyBuf.toString("utf8");
       const host = req.headers.host ?? "127.0.0.1";
       const url = new URL(req.url ?? "/", `http://${host}`);
       const wrapped: MockRequest = {
@@ -46,6 +48,7 @@ export async function startMockServer(handler: MockHandler): Promise<MockServer>
         pathname: url.pathname,
         headers: req.headers,
         body,
+        bodyBuf,
         json: () => (body ? JSON.parse(body) : null),
       };
       Promise.resolve(handler(wrapped, res)).catch((err: unknown) => {

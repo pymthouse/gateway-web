@@ -1,20 +1,38 @@
-# Releasing `@pymthouse/gateway-web`
+# Releasing gateway-web packages
 
-Releases are triggered by pushing a semver tag (`v*.*.*`). The [release workflow](../.github/workflows/release.yml) runs tests, builds, publishes to npm via **trusted publishing** (OIDC), and creates a GitHub Release.
+This repo publishes two packages. Each has its own semver and tag prefix:
 
-## First publish (one-time)
+| Package | Directory | Tag | First publish |
+|---|---|---|---|
+| `@pymthouse/gateway-web` | `packages/gateway-web` | `v*.*.*` | required (already on npm) |
+| `@pymthouse/gateway-stream` | `packages/gateway-stream` | `stream-v*.*.*` | one-time human publish, then OIDC |
 
-Trusted publishing attaches to an **existing** npm package. The name
-`@pymthouse/gateway-web` must be published once with a human token before OIDC
-can take over:
+The [release workflow](../.github/workflows/release.yml) derives the package
+directory from the tag, runs that workspace's tests and build, publishes to npm
+via **trusted publishing** (OIDC), and creates a GitHub Release.
+
+## First publish (one-time, per package)
+
+Trusted publishing attaches to an **existing** npm package. Publish once with a
+human token before OIDC can take over.
+
+### `@pymthouse/gateway-web` (already published)
 
 ```bash
 npm login
-npm publish --access public
+npm publish --access public --workspace @pymthouse/gateway-web
 ```
 
-Then add the trusted publisher below. Later versions go out from CI — do not
-leave a long-lived `NPM_TOKEN` on the repo.
+### `@pymthouse/gateway-stream` (do this once)
+
+```bash
+npm login
+npm ci --ignore-scripts
+npm publish --access public --workspace @pymthouse/gateway-stream
+```
+
+Then add the trusted publisher below for **each** package. Later versions go
+out from CI — do not leave a long-lived `NPM_TOKEN` on the repo.
 
 ## npm trusted publishing (required for CI)
 
@@ -22,7 +40,9 @@ This repo publishes with [npm trusted publishing](https://docs.npmjs.com/trusted
 
 ### One-time setup on npmjs.com
 
-1. Open **@pymthouse/gateway-web** → **Settings** → **Trusted Publisher**.
+Repeat for **@pymthouse/gateway-web** and **@pymthouse/gateway-stream**:
+
+1. Open the package → **Settings** → **Trusted Publisher**.
 2. Add a **GitHub Actions** publisher:
    - **Organization:** `pymthouse`
    - **Repository:** `gateway-web`
@@ -34,18 +54,21 @@ This repo publishes with [npm trusted publishing](https://docs.npmjs.com/trusted
 ### Workflow requirements (already in `release.yml`)
 
 - `permissions.id-token: write`
-- `actions/setup-node` with `registry-url: https://registry.npmjs.org`
+- `actions/setup-node` **without** `registry-url`
 - **No** `NODE_AUTH_TOKEN` / `NPM_TOKEN` on the publish step
-- `npm publish` (npm CLI ≥ 11.5.1)
+- `npm publish` from the package `working-directory` (npm CLI ≥ 11.5.1)
+- Every job installs with `npm ci --ignore-scripts`; `node-av`'s prebuilt addon
+  needs no lifecycle script, and its postinstall only fetches the `ffmpeg` CLI
+  that nothing here invokes
 
 `npm whoami` does not reflect OIDC auth; a failed publish usually means the trusted publisher fields do not match the workflow run (repo, workflow file name, or tag vs `workflow_dispatch`).
 
 ## Re-run a failed release
 
-If the tag already exists (e.g. `v0.1.0`) but npm publish failed:
+If the tag already exists (e.g. `v0.3.0` or `stream-v0.1.0`) but npm publish failed:
 
 1. Confirm trusted publishing and delete `NPM_TOKEN` if present.
-2. **Actions** → **release** → **Run workflow** → tag `v0.1.0` → **Run workflow**.
+2. **Actions** → **release** → **Run workflow** → tag `v0.3.0` or `stream-v0.1.0` → **Run workflow**.
 
 If you use `workflow_dispatch`, the trusted publisher must allow that trigger (same workflow file `release.yml`).
 
@@ -54,10 +77,23 @@ registry, it skips `npm publish` and still creates the GitHub Release.
 
 ## Cutting a new version
 
-Use the **Bump version** workflow or locally:
+Use the **Bump version** workflow (package + bump keyword) or locally:
 
 ```bash
-npm version patch   # or minor / major / prerelease
+# Core — tags vX.Y.Z
+npm version patch --workspace @pymthouse/gateway-web --no-git-tag-version
+VERSION=$(node -p "require('./packages/gateway-web/package.json').version")
+git add packages/gateway-web/package.json package-lock.json
+git commit -m "chore: release v${VERSION}"
+git tag "v${VERSION}"
+git push origin main --tags
+
+# Stream — tags stream-vX.Y.Z
+npm version patch --workspace @pymthouse/gateway-stream --no-git-tag-version
+VERSION=$(node -p "require('./packages/gateway-stream/package.json').version")
+git add packages/gateway-stream/package.json package-lock.json
+git commit -m "chore: release stream-v${VERSION}"
+git tag "stream-v${VERSION}"
 git push origin main --tags
 ```
 

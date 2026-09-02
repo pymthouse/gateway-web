@@ -1,0 +1,10 @@
+{
+  "name": "@pymthouse/test-utils",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Internal test helpers shared by the gateway-web workspaces. Never published.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

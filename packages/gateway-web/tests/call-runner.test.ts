@@ -3,7 +3,7 @@ import { callRunner, padRunnerPrice, runnerPaymentType } from "../src/call-runne
 import { LivepeerGatewayError, LivepeerHTTPError } from "../src/errors.js";
 import { clearSignerInfoCache } from "../src/signer.js";
 import type { LiveRunnerInstance } from "../src/types.js";
-import { json, startMockServer } from "./mock-server.js";
+import { json, startMockServer } from "@pymthouse/test-utils";
 
 function runner(overrides: Partial<LiveRunnerInstance> = {}): LiveRunnerInstance {
   return {
