@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PaymentError, SignerRefreshRequired } from "../src/errors.js";
 import { clearSignerInfoCache, getSignerInfo, LivePaymentSession } from "../src/signer.js";
-import { json, startMockServer } from "./mock-server.js";
+import { json, startMockServer } from "@pymthouse/test-utils";
 
 describe("signer", () => {
   it("getSignerInfo posts /sign-orchestrator-info and caches", async () => {

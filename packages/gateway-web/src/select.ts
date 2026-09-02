@@ -114,6 +114,13 @@ export function resolveApp(
   return null;
 }
 
+/**
+ * HTTP path on `app_url` for a persistent session call.
+ *
+ * Trickle apps still start over this HTTP POST (`/echo`, `/stream`, …). The
+ * response carries channel URLs; `TricklePublisher` / `TrickleSubscriber`
+ * then speak the segment protocol. WebSocket apps remain out of scope.
+ */
 export function endpointFor(app: string, endpoint?: string): string {
   if (endpoint?.trim()) {
     const ep = endpoint.trim();
