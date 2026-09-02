@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { LivepeerGatewayError, LivepeerHTTPError } from "../src/errors.js";
 import { getJson, httpOrigin, joinEndpoint, postJson } from "../src/http.js";
 import { stripTrailingSlashes } from "../src/strings.js";
-import { json, startMockServer } from "./mock-server.js";
+import { json, startMockServer } from "@pymthouse/test-utils";
 
 describe("http", () => {
   it("httpOrigin strips path", () => {

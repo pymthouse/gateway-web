@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { TrickleSubscriber } from "@pymthouse/gateway-web";
 import { MediaPublish } from "../src/media-publish.js";
 import { NodeAvLoadError, loadNodeAv } from "../src/load-av.js";
-import { json, startMockServer } from "./mock-server.js";
+import { json, startMockServer } from "@pymthouse/test-utils";
 
 function yuv420p(width: number, height: number, y: number): Buffer {
   const size = (width * height * 3) / 2;

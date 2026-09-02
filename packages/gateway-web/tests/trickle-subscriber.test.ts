@@ -1,7 +1,7 @@
 import type * as http from "node:http";
 import { describe, expect, it } from "vitest";
 import { TrickleSubscriber } from "../src/trickle/subscriber.js";
-import { json, startMockServer } from "./mock-server.js";
+import { json, startMockServer } from "@pymthouse/test-utils";
 
 describe("TrickleSubscriber", () => {
   it("GETs the segment and yields bytes", async () => {

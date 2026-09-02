@@ -41,6 +41,7 @@
     "node-av": "^6.1.1"
   },
   "devDependencies": {
+    "@pymthouse/test-utils": "*",
     "@types/node": "^20.19.24",
     "tsup": "^8.5.0",
     "typescript": "^5.9.3",

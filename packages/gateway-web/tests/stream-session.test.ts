@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { openStreamSession, resumeStreamSession } from "../src/stream-session.js";
 import { clearSignerInfoCache } from "../src/signer.js";
 import type { LiveRunnerInstance } from "../src/types.js";
-import { json, startMockServer, type MockRequest } from "./mock-server.js";
+import { json, startMockServer, type MockRequest } from "@pymthouse/test-utils";
 
 function runner(origin: string): LiveRunnerInstance {
   return {

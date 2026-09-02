@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TricklePublisher, TricklePublisherTerminalError } from "../src/trickle/publisher.js";
-import { json, startMockServer } from "./mock-server.js";
+import { json, startMockServer } from "@pymthouse/test-utils";
 
 describe("TricklePublisher", () => {
   it("POSTs seq 0 with reset, streams the body, DELETEs on close", async () => {
