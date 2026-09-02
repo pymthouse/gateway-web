@@ -6,7 +6,10 @@ Optional MPEG-TS media layer for trickle jobs that need frame encode/decode. Dep
 npm install @pymthouse/gateway-stream
 ```
 
-`node-av` runs install scripts that download FFmpeg binaries. Do not pass `--ignore-scripts` when installing this package.
+`--ignore-scripts` is safe here. `node-av` ships its native addon as a prebuilt
+platform-specific optional dependency, and its postinstall only downloads the
+standalone `ffmpeg` CLI, which this package never invokes — encode and decode go
+through the addon.
 
 ```ts
 import { MediaPublish, MediaOutput, publishFile } from "@pymthouse/gateway-stream";

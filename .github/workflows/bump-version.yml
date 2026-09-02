@@ -33,12 +33,10 @@ jobs:
           node-version: 24
           cache: npm
       - name: Install dependencies
-        run: |
-          if [ "${{ inputs.package }}" = "gateway-stream" ]; then
-            npm ci
-          else
-            npm ci --ignore-scripts
-          fi
+        # node-av needs no lifecycle scripts: the native addon is a prebuilt
+        # platform optionalDependency and its postinstall only fetches the
+        # standalone ffmpeg CLI, which this repo never shells out to.
+        run: npm ci --ignore-scripts
       - name: Build core types for stream workspace
         if: inputs.package == 'gateway-stream'
         run: npm run build --workspace @pymthouse/gateway-web

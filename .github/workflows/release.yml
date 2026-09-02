@@ -47,12 +47,10 @@ jobs:
             stream-v*)
               echo "dir=packages/gateway-stream" >> "$GITHUB_OUTPUT"
               echo "workspace=@pymthouse/gateway-stream" >> "$GITHUB_OUTPUT"
-              echo "install_scripts=true" >> "$GITHUB_OUTPUT"
               ;;
             v*)
               echo "dir=packages/gateway-web" >> "$GITHUB_OUTPUT"
               echo "workspace=@pymthouse/gateway-web" >> "$GITHUB_OUTPUT"
-              echo "install_scripts=false" >> "$GITHUB_OUTPUT"
               ;;
             *)
               echo "::error::Tag ${TAG} does not match v*.*.* or stream-v*.*.*"
@@ -61,12 +59,10 @@ jobs:
           esac
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
       - name: Install dependencies
-        run: |
-          if [ "${{ steps.pkg.outputs.install_scripts }}" = "true" ]; then
-            npm ci
-          else
-            npm ci --ignore-scripts
-          fi
+        # node-av's native addon arrives as a prebuilt platform optionalDependency,
+        # and its postinstall only downloads the standalone ffmpeg CLI, which this
+        # repo never shells out to. So no workspace needs lifecycle scripts.
+        run: npm ci --ignore-scripts
       - name: Build core types for stream workspace
         if: steps.pkg.outputs.workspace == '@pymthouse/gateway-stream'
         run: npm run build --workspace @pymthouse/gateway-web

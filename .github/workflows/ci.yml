@@ -34,8 +34,10 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      # node-av postinstall downloads FFmpeg; do not pass --ignore-scripts.
-      - run: npm ci
+      # node-av's native addon is a prebuilt platform optionalDependency, and its
+      # postinstall only fetches the standalone ffmpeg CLI, which this repo never
+      # shells out to — so the encode/decode path works without lifecycle scripts.
+      - run: npm ci --ignore-scripts
       - run: npm run build --workspace @pymthouse/gateway-web
       - run: npm run typecheck --workspace @pymthouse/gateway-stream
       - run: npm test --workspace @pymthouse/gateway-stream

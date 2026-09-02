@@ -25,12 +25,9 @@ npm publish --access public --workspace @pymthouse/gateway-web
 
 ### `@pymthouse/gateway-stream` (do this once)
 
-`node-av` must install with scripts so FFmpeg binaries are present for the
-prepublish build:
-
 ```bash
 npm login
-npm ci
+npm ci --ignore-scripts
 npm publish --access public --workspace @pymthouse/gateway-stream
 ```
 
@@ -60,7 +57,9 @@ Repeat for **@pymthouse/gateway-web** and **@pymthouse/gateway-stream**:
 - `actions/setup-node` **without** `registry-url`
 - **No** `NODE_AUTH_TOKEN` / `NPM_TOKEN` on the publish step
 - `npm publish` from the package `working-directory` (npm CLI ≥ 11.5.1)
-- Stream tags run `npm ci` **with** install scripts (`node-av` downloads FFmpeg)
+- Every job installs with `npm ci --ignore-scripts`; `node-av`'s prebuilt addon
+  needs no lifecycle script, and its postinstall only fetches the `ffmpeg` CLI
+  that nothing here invokes
 
 `npm whoami` does not reflect OIDC auth; a failed publish usually means the trusted publisher fields do not match the workflow run (repo, workflow file name, or tag vs `workflow_dispatch`).
 
