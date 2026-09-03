@@ -126,6 +126,19 @@ function rejectEndpointForSingleShotPool(runners: LiveRunnerInstance[], endpoint
   rejectSingleShotEndpoint(endpoint);
 }
 
+function selectModeRunners(
+  runners: LiveRunnerInstance[],
+  app: string,
+  endpoint?: string,
+): LiveRunnerInstance[] {
+  const wanted: RunnerMode = endpoint?.trim() ? "persistent" : "single-shot";
+  const selected = runners.filter((runner) => advertisedMode(runner.mode) === wanted);
+  if (selected.length === 0) {
+    throw new NoRunnerAvailableError(`no ${wanted} runner for app ${app} in discovery`);
+  }
+  return selected;
+}
+
 function buildPayload(req: InferenceRequest): Record<string, unknown> {
   const payload: Record<string, unknown> = { ...req.params };
   const cap = req.capability.toLowerCase();
@@ -344,18 +357,7 @@ export function createGateway(config: GatewayConfig): Gateway {
         requirePersistentEndpoint(app, req.endpoint);
       }
 
-      const endpointProvided = Boolean(req.endpoint?.trim());
-      const attemptRunners = runners.filter((runner) => {
-        const mode = advertisedMode(runner.mode);
-        return endpointProvided ? mode === "persistent" : mode === "single-shot";
-      });
-      if (attemptRunners.length === 0) {
-        throw new NoRunnerAvailableError(
-          endpointProvided
-            ? `no persistent runner for app ${app} in discovery`
-            : `no single-shot runner for app ${app} in discovery`,
-        );
-      }
+      const attemptRunners = selectModeRunners(runners, app, req.endpoint);
 
       const payload = buildPayload(req);
       const rejections: Array<{ url: string; reason: string }> = [];
