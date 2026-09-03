@@ -69,9 +69,23 @@ jobs:
           # Prerelease versions (e.g. 0.1.0-rc.1) must publish under a non-`latest`
           # dist-tag so `npm install <pkg>` keeps resolving the stable release.
           case "$VERSION" in
-            *-*) npm publish --access public --tag rc ;;
-            *)   npm publish --access public ;;
+            *-*) PUBLISH_ARGS="--access public --tag rc" ;;
+            *)   PUBLISH_ARGS="--access public" ;;
           esac
+          # npm 11.5.x can exit E401 ("token is invalid") after a successful OIDC
+          # PUT. Retry, and treat an already-published version as success.
+          for attempt in 1 2 3; do
+            if npm publish $PUBLISH_ARGS; then
+              exit 0
+            fi
+            echo "publish attempt ${attempt} failed; checking registry"
+            if npm view "${PKG}@${VERSION}" version >/dev/null 2>&1; then
+              echo "Already published ${PKG}@${VERSION}; treating as success."
+              exit 0
+            fi
+            sleep 15
+          done
+          exit 1
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
