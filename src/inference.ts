@@ -29,11 +29,12 @@ import {
   type CallSessionResult,
   type RunnerSession,
 } from "./session.js";
-import type { HeadersMap, LiveRunnerInstance } from "./types.js";
+import { SignerCredential } from "./signer-credential.js";
+import type { LiveRunnerInstance, SignerCredentialInput } from "./types.js";
 
 export interface GatewayConfig {
   signerUrl: string;
-  signerHeaders?: HeadersMap;
+  signerHeaders?: SignerCredentialInput;
   discoveryUrl?: string;
   /**
    * Skip TLS verification for runner and discovery hosts (self-signed orch certs).
@@ -52,6 +53,11 @@ export interface GatewayConfig {
    * The signer records "direct_api" when it is absent.
    */
   attributionSource?: string;
+  /**
+   * Refresh a provider credential this many milliseconds before expiresInSeconds.
+   * Default 30_000. Ignored for static header bags.
+   */
+  signerRefreshSkewMs?: number;
 }
 
 export interface InferenceRequest {
@@ -235,11 +241,14 @@ export function createGateway(config: GatewayConfig): Gateway {
   );
   const orchestratorCacheTtlMs = config.orchestratorCacheTtlMs ?? DEFAULT_ORCH_CACHE_TTL_MS;
   const orchCache = new OrchestratorCache();
+  const credential = SignerCredential.from(config.signerHeaders, {
+    skewMs: config.signerRefreshSkewMs,
+  });
 
   async function loadEntries(timeoutMs: number) {
     return discoverRunners({
       signerUrl: config.signerUrl,
-      signerHeaders: config.signerHeaders,
+      signerHeaders: credential,
       discoveryUrl: config.discoveryUrl,
       timeoutMs: Math.min(timeoutMs, 15_000),
       insecureTls,
@@ -289,7 +298,7 @@ export function createGateway(config: GatewayConfig): Gateway {
       runner,
       payload,
       signerUrl: config.signerUrl,
-      signerHeaders: config.signerHeaders,
+      signerHeaders: credential,
       timeoutMs,
       insecureTls,
       gatewayRequestId,
@@ -310,7 +319,7 @@ export function createGateway(config: GatewayConfig): Gateway {
       runner,
       payload,
       signerUrl: config.signerUrl,
-      signerHeaders: config.signerHeaders,
+      signerHeaders: credential,
       timeoutMs,
       insecureTls,
       gatewayRequestId,
@@ -448,7 +457,7 @@ export function createGateway(config: GatewayConfig): Gateway {
               runner,
               payload: req.params ?? {},
               signerUrl: config.signerUrl,
-              signerHeaders: config.signerHeaders,
+              signerHeaders: credential,
               timeoutMs: defaultTimeoutMs,
               insecureTls,
               startFunding: req.startFunding,
