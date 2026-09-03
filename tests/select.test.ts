@@ -56,11 +56,13 @@ describe("select", () => {
     expect(advertisedMode("PERSISTENT")).toBe("persistent");
   });
 
-  it("normalizeAppBase suffixes /app and leaves /session alone", () => {
-    expect(normalizeAppBase("https://x/apps/flux/session")).toBe("https://x/apps/flux/session/app");
-    expect(normalizeAppBase("https://x/apps/flux")).toBe("https://x/apps/flux/app");
-    expect(normalizeAppBase("https://x/apps/flux/app")).toBe("https://x/apps/flux/app");
-    expect(normalizeAppBase("https://x/apps/flux/app/")).toBe("https://x/apps/flux/app");
+  it("normalizeAppBase suffixes /app/ so Go mux does not 301 the POST", () => {
+    expect(normalizeAppBase("https://x/apps/flux/session")).toBe(
+      "https://x/apps/flux/session/app/",
+    );
+    expect(normalizeAppBase("https://x/apps/flux")).toBe("https://x/apps/flux/app/");
+    expect(normalizeAppBase("https://x/apps/flux/app")).toBe("https://x/apps/flux/app/");
+    expect(normalizeAppBase("https://x/apps/flux/app/")).toBe("https://x/apps/flux/app/");
   });
 
   it("resolveApp: override, then exact capability === runner.app", () => {
@@ -127,13 +129,25 @@ describe("select", () => {
   it("pickRunners returns one runner per orchestrator up to max", () => {
     const many: DiscoveryEntry[] = [
       entry("https://orch-1:8936", [
-        { app: "livepeer-example/fal-flux-schnell", url: "https://orch-1:8936/a", mode: "single-shot" },
+        {
+          app: "livepeer-example/fal-flux-schnell",
+          url: "https://orch-1:8936/a",
+          mode: "single-shot",
+        },
       ]),
       entry("https://orch-2:8936", [
-        { app: "livepeer-example/fal-flux-schnell", url: "https://orch-2:8936/b", mode: "single-shot" },
+        {
+          app: "livepeer-example/fal-flux-schnell",
+          url: "https://orch-2:8936/b",
+          mode: "single-shot",
+        },
       ]),
       entry("https://orch-3:8936", [
-        { app: "livepeer-example/fal-flux-schnell", url: "https://orch-3:8936/c", mode: "single-shot" },
+        {
+          app: "livepeer-example/fal-flux-schnell",
+          url: "https://orch-3:8936/c",
+          mode: "single-shot",
+        },
       ]),
     ];
     const picked = pickRunners(many, "livepeer-example/fal-flux-schnell", {}, 5);

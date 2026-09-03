@@ -88,13 +88,15 @@ export function resolveApp(
   return null;
 }
 
-/** Suffix `/app` when the catalog published a bare runner base. Never rewrite `/session`. */
+/**
+ * Suffix `/app/` when the catalog published a bare runner base.
+ * Keep the trailing slash: Go's mux 301s `/apps/<id>/app` → `/app/` and drops POST.
+ * Never rewrite a `/session` control URL into something else — only append `/app/`.
+ */
 export function normalizeAppBase(base: string): string {
   const trimmed = stripTrailingSlashes(base);
-  if (!trimmed.endsWith("/app")) {
-    return `${trimmed}/app`;
-  }
-  return trimmed;
+  const withApp = trimmed.endsWith("/app") ? trimmed : `${trimmed}/app`;
+  return `${withApp}/`;
 }
 
 function defaultChoose<T>(items: T[]): T {

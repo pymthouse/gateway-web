@@ -39,6 +39,13 @@ function replyPaidApp(
   json(res, 200, success);
 }
 
+function lookupPath<T>(table: Record<string, T> | undefined, pathname: string): T | undefined {
+  if (!table) return undefined;
+  if (pathname in table) return table[pathname];
+  const alt = pathname.endsWith("/") ? pathname.slice(0, -1) : `${pathname}/`;
+  return table[alt];
+}
+
 function liveRunnerHandler(opts: {
   catalog: (origin: string) => unknown[];
   onDiscover?: (req: MockRequest) => void;
@@ -55,12 +62,12 @@ function liveRunnerHandler(opts: {
       return;
     }
     if (replySignerPayment(req, res, {})) return;
-    const failBody = opts.failPaths?.[req.pathname];
+    const failBody = lookupPath(opts.failPaths, req.pathname);
     if (failBody !== undefined) {
       json(res, 500, failBody);
       return;
     }
-    const paid = opts.paidPaths[req.pathname];
+    const paid = lookupPath(opts.paidPaths, req.pathname);
     if (paid) {
       replyPaidApp(paid.hits, req, res, paid.success, paid.onPaid);
       return;
@@ -115,8 +122,53 @@ describe("runInference", () => {
         expect(res.videoUrl).toBeNull();
         expect(res.app).toBe(app);
         expect(res.mode).toBe("single-shot");
-        expect(res.runnerUrl).toContain("/apps/flux/app");
+        expect(res.runnerUrl).toMatch(/\/apps\/flux\/app\/$/);
         expect(hits.n).toBe(2);
+      },
+    );
+  });
+
+  it("POSTs /app/ so a Go mux 301 on the advertised /app is never treated as a receipt", async () => {
+    const hits = { n: 0 };
+    let noSlashPosts = 0;
+    const app = "livepeer-example/fal-flux-schnell";
+    await withGateway(
+      (req, res) => {
+        if (req.pathname === "/discover-orchestrators") {
+          json(res, 200, [
+            {
+              address: req.url.origin,
+              runners: [runner(req.url.origin, app, "/apps/flux/app", "r1")],
+            },
+          ]);
+          return;
+        }
+        if (replySignerPayment(req, res, {})) return;
+        if (req.pathname === "/apps/flux/app") {
+          noSlashPosts += 1;
+          res.writeHead(301, { Location: "/apps/flux/app/" });
+          res.end();
+          return;
+        }
+        if (req.pathname === "/apps/flux/app/") {
+          replyPaidApp(hits, req, res, {
+            request_id: "req-flux",
+            endpoint_id: "fal-ai/flux/schnell",
+            output: { images: [{ url: "https://cdn.example/fox.png" }] },
+          });
+          return;
+        }
+        json(res, 404, { error: { message: req.pathname } });
+      },
+      async (gw) => {
+        const res = await gw.runInference({
+          capability: app,
+          params: { prompt: "a red fox" },
+        });
+        expect(noSlashPosts).toBe(0);
+        expect(hits.n).toBe(2);
+        expect(res.imageUrl).toBe("https://cdn.example/fox.png");
+        expect(res.runnerUrl).toMatch(/\/apps\/flux\/app\/$/);
       },
     );
   });
@@ -295,7 +347,7 @@ describe("runInference", () => {
           capability: app,
           params: { prompt: "a dragon" },
         });
-        expect(res.runnerUrl).toMatch(/\/apps\/fal-grok-image-2\/app$/);
+        expect(res.runnerUrl).toMatch(/\/apps\/fal-grok-image-2\/app\/$/);
         expect(res.runnerUrl).not.toContain("/generate");
         expect(res.imageUrl).toBe("https://cdn.example/grok.png");
         expect(hits.n).toBe(2);
@@ -318,7 +370,7 @@ describe("runInference", () => {
         return;
       }
       if (replySignerPayment(req, res, {})) return;
-      if (req.pathname === "/apps/ray/app") {
+      if (req.pathname === "/apps/ray/app" || req.pathname === "/apps/ray/app/") {
         hits.n += 1;
         if (hits.n === 1) {
           json(res, 402, {

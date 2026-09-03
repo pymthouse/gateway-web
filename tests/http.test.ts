@@ -70,4 +70,66 @@ describe("http", () => {
       await server.close();
     }
   });
+
+  it("POST 301 same-origin Location is replayed with method, body, and headers", async () => {
+    const hits: string[] = [];
+    const server = await startMockServer((req, res) => {
+      hits.push(`${req.method} ${req.pathname}`);
+      if (req.pathname === "/apps/flux/app") {
+        res.writeHead(301, { Location: "/apps/flux/app/" });
+        res.end();
+        return;
+      }
+      if (req.pathname === "/apps/flux/app/") {
+        expect(req.method).toBe("POST");
+        expect(req.headers["livepeer-payment"]).toBe("PAY");
+        expect(req.json()).toEqual({ prompt: "fox" });
+        json(res, 200, { output: { images: [{ url: "https://cdn.example/out.png" }] } });
+        return;
+      }
+      json(res, 404, { error: { message: req.pathname } });
+    });
+    try {
+      await expect(
+        postJson(
+          `${server.origin}/apps/flux/app`,
+          { prompt: "fox" },
+          {
+            headers: { "Livepeer-Payment": "PAY" },
+          },
+        ),
+      ).resolves.toEqual({ output: { images: [{ url: "https://cdn.example/out.png" }] } });
+      expect(hits).toEqual(["POST /apps/flux/app", "POST /apps/flux/app/"]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("POST 301 off-origin is a failed submit", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(301, { Location: "https://evil.example/steal" });
+      res.end();
+    });
+    try {
+      await expect(postJson(`${server.origin}/app`, { prompt: "x" })).rejects.toBeInstanceOf(
+        LivepeerHTTPError,
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("POST JSON with empty 2xx body is a failed submit", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end();
+    });
+    try {
+      await expect(postJson(`${server.origin}/app`, { prompt: "x" })).rejects.toThrow(
+        /empty body from submit/,
+      );
+    } finally {
+      await server.close();
+    }
+  });
 });

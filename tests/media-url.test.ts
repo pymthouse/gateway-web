@@ -28,6 +28,17 @@ describe("extractMediaUrl", () => {
     ).toBe("https://cdn.example/grok.png");
   });
 
+  it("reads runner receipt output.video.url", () => {
+    expect(
+      extractMediaUrl({
+        request_id: "req-ray",
+        endpoint_id: "luma/agent/ray/v3.2/text-to-video",
+        schema_sha256: "a".repeat(64),
+        output: { video: { url: "https://cdn.example/out.mp4" } },
+      }),
+    ).toBe("https://cdn.example/out.mp4");
+  });
+
   it("reads meshy model_urls", () => {
     expect(extractMediaUrl({ model_urls: { glb: "https://a/m.glb" } })).toBe("https://a/m.glb");
   });
