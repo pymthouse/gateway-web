@@ -33,6 +33,10 @@ export interface ReserveSessionOptions {
    * Pass false to hand the payment session to another holder.
    */
   startFunding?: boolean;
+  /** Job id sent to the signer so its ticket carries a joinable request id. */
+  gatewayRequestId?: string | null;
+  /** Which integration issued the call. The signer defaults to "direct_api". */
+  attributionSource?: string | null;
 }
 
 export interface CallSessionOptions {
@@ -77,6 +81,8 @@ export async function reserveSession(options: ReserveSessionOptions): Promise<Ru
     signerHeaders: options.signerHeaders,
     timeoutMs: options.timeoutMs,
     insecureTls: options.insecureTls,
+    gatewayRequestId: options.gatewayRequestId,
+    attributionSource: options.attributionSource,
   });
 
   const sessionId = stringField(result.data, "session_id");

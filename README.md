@@ -33,6 +33,7 @@ const gw = createGateway({
   // discoveryUrl defaults to `${signerUrl}/discover-orchestrators`
   insecureTls: true, // runner + discovery only; signer stays verified
   timeoutMs: 600_000,
+  attributionSource: "pymthouse_gateway", // gateway stack recorded on every ticket
 });
 
 const res = await gw.runInference({
@@ -40,7 +41,7 @@ const res = await gw.runInference({
   params: { prompt: "a dragon" },
 });
 
-console.log(res.url, res.mode);
+console.log(res.url, res.mode, res.gatewayRequestId);
 
 // Persistent HTTP apps: pass the app path. WebSocket / trickle apps are out of scope.
 const hello = await gw.runInference({
@@ -68,6 +69,23 @@ Uses Console's `PYMTHOUSE_*` M2M vars to mint a signer JWT, then runs
 `createGateway().runInference()` against pymthouse discovery. Default capability
 is `vllm/qwen3-coder-30b` (chat completion). Override with `CAPABILITY`,
 `MODEL`, and `PROMPT`.
+
+## Usage attribution
+
+Every paid call sends `gatewayRequestId` and `attributionSource` in the
+`/generate-live-payment` body, which PymtHouse records on the resulting ticket
+rows as `gateway_request_id` / `attribution_source`. That is what lets a caller
+join a job it made to what that job actually cost.
+
+`runInference` generates a `gatewayRequestId` when you do not supply one and
+always returns it on the result. Pass your own when you need the id **before**
+the call — e.g. to record a prompt against it, or to attribute a call that pays
+tickets and then fails.
+
+`attributionSource` belongs on `createGateway` because it names the gateway
+stack, not the job. PymtHouse documents the vocabulary as `pymthouse_gateway |
+python_gateway | direct_api` and defaults to `direct_api`; this package is
+`pymthouse_gateway`.
 
 ## TLS
 

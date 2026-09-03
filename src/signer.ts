@@ -105,6 +105,14 @@ export interface LivePaymentSessionOptions {
   maxRefreshRetries?: number;
   /** Restored ticket state from a previous isolate or process. */
   state?: Record<string, unknown> | null;
+  /**
+   * Caller-owned job id echoed to the signer so the ticket it mints can be
+   * joined back to the request that paid for it. Without it the metering
+   * pipeline records the ticket with a null gateway_request_id.
+   */
+  gatewayRequestId?: string | null;
+  /** Which integration issued the call. The signer defaults to "direct_api". */
+  attributionSource?: string | null;
 }
 
 /** Serializable payment loop — enough to resume `runPayments` elsewhere. */
@@ -114,6 +122,8 @@ export interface PaymentSessionSnapshot {
   app: string | null;
   maxPrice: LiveRunnerPriceInfo | null;
   state: Record<string, unknown> | null;
+  gatewayRequestId: string | null;
+  attributionSource: string | null;
 }
 
 export class LivePaymentSession {
@@ -124,6 +134,8 @@ export class LivePaymentSession {
   private readonly app: string | null;
   private readonly maxPrice: LiveRunnerPriceInfo | null;
   private readonly maxRefreshRetries: number;
+  private readonly gatewayRequestId: string | null;
+  private readonly attributionSource: string | null;
   private state: Record<string, unknown> | null = null;
 
   constructor(options: LivePaymentSessionOptions) {
@@ -145,6 +157,8 @@ export class LivePaymentSession {
           }
         : null;
     this.maxRefreshRetries = Math.max(0, options.maxRefreshRetries ?? 3);
+    this.gatewayRequestId = options.gatewayRequestId?.trim() || null;
+    this.attributionSource = options.attributionSource?.trim() || null;
     this.state = options.state ?? null;
   }
 
@@ -155,6 +169,8 @@ export class LivePaymentSession {
       app: this.app,
       maxPrice: this.maxPrice === null ? null : { ...this.maxPrice },
       state: this.state === null ? null : { ...this.state },
+      gatewayRequestId: this.gatewayRequestId,
+      attributionSource: this.attributionSource,
     };
   }
 
@@ -173,6 +189,8 @@ export class LivePaymentSession {
       maxPrice: options.snapshot.maxPrice,
       maxRefreshRetries: options.maxRefreshRetries,
       state: options.snapshot.state,
+      gatewayRequestId: options.snapshot.gatewayRequestId,
+      attributionSource: options.snapshot.attributionSource,
     });
   }
 
@@ -258,6 +276,8 @@ export class LivePaymentSession {
     if (this.app) payload.app = this.app;
     if (this.maxPrice !== null) payload.maxPrice = { ...this.maxPrice };
     if (this.state !== null) payload.state = this.state;
+    if (this.gatewayRequestId) payload.gatewayRequestId = this.gatewayRequestId;
+    if (this.attributionSource) payload.attributionSource = this.attributionSource;
 
     const data = await postJson(url, payload, {
       headers: this.signerHeaders,

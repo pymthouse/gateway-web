@@ -91,6 +91,77 @@ describe("signer", () => {
     }
   });
 
+  it("sends gatewayRequestId and attributionSource so tickets stay joinable", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const server = await startMockServer((req, res) => {
+      if (req.pathname === "/generate-live-payment") {
+        bodies.push(req.json() as Record<string, unknown>);
+        json(res, 200, { payment: "pay-1", segCreds: "seg-1", state: { n: 1 } });
+        return;
+      }
+      json(res, 404, { error: { message: req.pathname } });
+    });
+    try {
+      clearSignerInfoCache();
+      const session = new LivePaymentSession({
+        signerUrl: server.origin,
+        type: "fixed",
+        challenge: {
+          paymentParams: "params-1",
+          manifestId: "man-1",
+          paymentUrl: `${server.origin}/pay`,
+        },
+        gatewayRequestId: "job_abc123",
+        attributionSource: "mcp",
+      });
+      await session.getPayment();
+      expect(bodies[0]?.gatewayRequestId).toBe("job_abc123");
+      expect(bodies[0]?.attributionSource).toBe("mcp");
+
+      // The pair must survive a handoff, or a resumed loop bills unattributed.
+      const resumed = LivePaymentSession.fromSnapshot({
+        signerUrl: server.origin,
+        snapshot: session.snapshot(),
+      });
+      await resumed.getPayment();
+      expect(bodies[1]?.gatewayRequestId).toBe("job_abc123");
+      expect(bodies[1]?.attributionSource).toBe("mcp");
+    } finally {
+      clearSignerInfoCache();
+      await server.close();
+    }
+  });
+
+  it("omits attribution fields when the caller supplies none", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const server = await startMockServer((req, res) => {
+      if (req.pathname === "/generate-live-payment") {
+        bodies.push(req.json() as Record<string, unknown>);
+        json(res, 200, { payment: "pay-1", segCreds: "seg-1", state: { n: 1 } });
+        return;
+      }
+      json(res, 404, { error: { message: req.pathname } });
+    });
+    try {
+      clearSignerInfoCache();
+      const session = new LivePaymentSession({
+        signerUrl: server.origin,
+        type: "fixed",
+        challenge: {
+          paymentParams: "params-1",
+          manifestId: "man-1",
+          paymentUrl: `${server.origin}/pay`,
+        },
+      });
+      await session.getPayment();
+      expect(bodies[0]).not.toHaveProperty("gatewayRequestId");
+      expect(bodies[0]).not.toHaveProperty("attributionSource");
+    } finally {
+      clearSignerInfoCache();
+      await server.close();
+    }
+  });
+
   it("snapshot round-trips state so fromSnapshot continues the payment sequence", async () => {
     let payHits = 0;
     const server = await startMockServer((req, res) => {

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { callRunner } from "./call-runner.js";
 import { discoverRunners } from "./discovery.js";
 import { LivepeerGatewayError, NoRunnerAvailableError } from "./errors.js";
@@ -46,6 +48,11 @@ export interface GatewayConfig {
   maxOrchestrators?: number;
   /** TTL for the orchestrator pool cache (default 60s). */
   orchestratorCacheTtlMs?: number;
+  /**
+   * Names the integration on every ticket this gateway pays for, e.g. "mcp".
+   * The signer records "direct_api" when it is absent.
+   */
+  attributionSource?: string;
 }
 
 export interface InferenceRequest {
@@ -60,6 +67,11 @@ export interface InferenceRequest {
   endpoint?: string;
   modelId?: string;
   model_id?: string;
+  /**
+   * Job id to attribute this call's tickets to. Generated when omitted, and
+   * always returned on the result so the caller can join it to metering.
+   */
+  gatewayRequestId?: string;
 }
 
 export interface InferenceResult {
@@ -73,6 +85,8 @@ export interface InferenceResult {
   imageUrl: string | null;
   videoUrl: string | null;
   audioUrl: string | null;
+  /** The id carried on this call's payment tickets. */
+  gatewayRequestId: string;
 }
 
 function lastAppSegment(app: string): string {
@@ -126,6 +140,7 @@ function buildInferenceResult(options: {
   runnerUrl: string;
   data: Record<string, unknown>;
   t0: number;
+  gatewayRequestId: string;
 }): InferenceResult {
   const url = extractMediaUrl(options.data) ?? extractMediaUrl({ data: options.data });
   const kind = capabilityMediaKind(options.req.capability);
@@ -140,6 +155,7 @@ function buildInferenceResult(options: {
     imageUrl: kind === "image" ? url : null,
     videoUrl: kind === "video" ? url : null,
     audioUrl: kind === "audio" ? url : null,
+    gatewayRequestId: options.gatewayRequestId,
   };
 }
 
@@ -149,6 +165,8 @@ export interface ReserveSessionRequest {
   app?: string;
   /** Default true. Pass false to hand payment state to another process. */
   startFunding?: boolean;
+  /** Job id to attribute this session's tickets to. Generated when omitted. */
+  gatewayRequestId?: string;
 }
 
 export interface CallSessionRequest {
@@ -221,6 +239,7 @@ export function createGateway(config: GatewayConfig): Gateway {
     req: InferenceRequest,
     payload: Record<string, unknown>,
     timeoutMs: number,
+    gatewayRequestId: string,
   ) {
     const endpoint = endpointFor(runner.app, req.endpoint);
     const runnerUrl = joinEndpoint(normalizeAppBase(runner.url), endpoint);
@@ -232,6 +251,8 @@ export function createGateway(config: GatewayConfig): Gateway {
       signerHeaders: config.signerHeaders,
       timeoutMs,
       insecureTls,
+      gatewayRequestId,
+      attributionSource: config.attributionSource ?? null,
     });
     return { runnerUrl, data: result.data };
   }
@@ -241,6 +262,7 @@ export function createGateway(config: GatewayConfig): Gateway {
     req: InferenceRequest,
     payload: Record<string, unknown>,
     timeoutMs: number,
+    gatewayRequestId: string,
   ) {
     const endpoint = requirePersistentEndpoint(runner.app, req.endpoint);
     const session = await reserveRunnerSession({
@@ -250,6 +272,8 @@ export function createGateway(config: GatewayConfig): Gateway {
       signerHeaders: config.signerHeaders,
       timeoutMs,
       insecureTls,
+      gatewayRequestId,
+      attributionSource: config.attributionSource ?? null,
     });
     try {
       const result = await callRunnerSession(session, {
@@ -276,6 +300,7 @@ export function createGateway(config: GatewayConfig): Gateway {
       }
       const timeoutMs =
         req.timeoutMs ?? (typeof req.timeout === "number" ? req.timeout * 1000 : defaultTimeoutMs);
+      const gatewayRequestId = req.gatewayRequestId?.trim() || randomUUID();
 
       const entries = await loadEntries(timeoutMs);
       const instances = instancesFromDiscovery(entries);
@@ -300,14 +325,15 @@ export function createGateway(config: GatewayConfig): Gateway {
         try {
           const result =
             mode === "persistent"
-              ? await runPersistent(runner, req, payload, timeoutMs)
-              : await runSingleShot(runner, req, payload, timeoutMs);
+              ? await runPersistent(runner, req, payload, timeoutMs, gatewayRequestId)
+              : await runSingleShot(runner, req, payload, timeoutMs, gatewayRequestId);
           return buildInferenceResult({
             req,
             runner,
             runnerUrl: result.runnerUrl,
             data: result.data,
             t0,
+            gatewayRequestId,
           });
         } catch (e) {
           lastError = e;
@@ -355,6 +381,7 @@ export function createGateway(config: GatewayConfig): Gateway {
           `no LR runner for app ${app} in discovery (modes: persistent)`,
         );
       }
+      const gatewayRequestId = req.gatewayRequestId?.trim() || randomUUID();
       const rejections: Array<{ url: string; reason: string }> = [];
       let lastError: unknown;
       for (const runner of runners) {
@@ -367,6 +394,8 @@ export function createGateway(config: GatewayConfig): Gateway {
             timeoutMs: defaultTimeoutMs,
             insecureTls,
             startFunding: req.startFunding,
+            gatewayRequestId,
+            attributionSource: config.attributionSource ?? null,
           });
         } catch (e) {
           lastError = e;
