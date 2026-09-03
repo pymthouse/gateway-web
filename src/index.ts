@@ -19,7 +19,6 @@ export {
   pickInferencePool,
   appFamilyPrefix,
   resolveApp,
-  endpointFor,
   normalizeAppBase,
   instancesFromDiscovery,
   priceInfoFromJson,

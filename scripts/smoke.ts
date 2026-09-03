@@ -4,10 +4,12 @@
  *   CONSOLE_ENV=/home/elite/repos/console/.env npm run smoke
  *
  * Optional:
- *   CAPABILITY   default vllm/qwen3-coder-30b
- *   MODEL        default qwen3-coder-30b (vLLM model id on the runner)
- *   PROMPT       default "Reply with exactly one word: hello"
+ *   CAPABILITY   default livepeer-example/fal-flux-schnell
+ *   PROMPT       default "a red dragon in watercolor"
  *   EXTERNAL_USER_ID  default gateway-web-smoke
+ *
+ * For vLLM or other runners whose discovery URL is not the execute path, use
+ * callRunner with an explicit runnerUrl instead of runInference.
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -147,22 +149,13 @@ async function mintPymthouseSession(): Promise<{
   };
 }
 
-function chatContent(data: Record<string, unknown>): string | null {
-  const choices = data.choices;
-  if (!Array.isArray(choices) || choices.length === 0) return null;
-  const first = choices[0] as Record<string, unknown> | undefined;
-  const message = first?.message as Record<string, unknown> | undefined;
-  return typeof message?.content === "string" ? message.content : null;
-}
-
 async function main(): Promise<void> {
   loadEnvFile(process.env.CONSOLE_ENV?.trim() || resolve(process.cwd(), "../console/.env"));
   loadEnvFile(resolve(process.cwd(), ".env"));
 
   const session = await mintPymthouseSession();
-  const capability = process.env.CAPABILITY?.trim() || "vllm/qwen3-coder-30b";
-  const model = process.env.MODEL?.trim() || "qwen3-coder-30b";
-  const prompt = process.env.PROMPT ?? "Reply with exactly one word: hello";
+  const capability = process.env.CAPABILITY?.trim() || "livepeer-example/fal-flux-schnell";
+  const prompt = process.env.PROMPT ?? "a red dragon in watercolor";
 
   const signerHeaders = { Authorization: `Bearer ${session.jwt}` };
   const gw = createGateway({
@@ -173,25 +166,20 @@ async function main(): Promise<void> {
   });
 
   console.log(
-    `smoke: capability=${capability} model=${model} signer=${session.signerUrl} ` +
+    `smoke: capability=${capability} signer=${session.signerUrl} ` +
       `balanceUsdMicros=${session.balanceUsdMicros}`,
   );
 
   const t0 = Date.now();
   const result = await gw.runInference({
     capability,
-    params: {
-      model,
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: 32,
-    },
+    params: { prompt },
   });
 
-  const content = chatContent(result.data);
   console.log(`smoke OK  ${Date.now() - t0}ms  ${result.app}`);
   console.log(`  orchestrator ${result.orchestrator}`);
   console.log(`  runner       ${result.runnerUrl}`);
-  if (content) console.log(`  reply        ${content.slice(0, 200)}`);
+  if (result.url) console.log(`  media        ${result.url}`);
   else console.log(`  data         ${JSON.stringify(result.data).slice(0, 400)}`);
 }
 

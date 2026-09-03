@@ -1,6 +1,6 @@
 import type { ServerResponse } from "node:http";
 import { describe, expect, it } from "vitest";
-import { NoRunnerAvailableError } from "../src/errors.js";
+import { NoRunnerAvailableError, LivepeerGatewayError } from "../src/errors.js";
 import { createGateway, type Gateway } from "../src/inference.js";
 import { clearSignerInfoCache } from "../src/signer.js";
 import { json, startMockServer, type MockHandler, type MockRequest } from "./mock-server.js";
@@ -237,6 +237,34 @@ describe("runInference", () => {
         expect(res.url).toBe("https://cdn.example/sibling.jpg");
         expect(res.app).toBe("image-generation/stability/sdxl");
         expect(hits.n).toBe(2);
+      },
+    );
+  });
+
+  it("rejects endpoint on single-shot capabilities", async () => {
+    const app = "livepeer-example/fal-flux-schnell";
+    await withGateway(
+      liveRunnerHandler({
+        catalog: (origin) => [
+          { address: origin, runners: [runner(origin, app, "/apps/flux/app", "r1")] },
+        ],
+        paidPaths: {},
+      }),
+      async (gw) => {
+        await expect(
+          gw.runInference({
+            capability: app,
+            params: { prompt: "a dragon" },
+            endpoint: "/hello",
+          }),
+        ).rejects.toBeInstanceOf(LivepeerGatewayError);
+        await expect(
+          gw.runInference({
+            capability: app,
+            params: { prompt: "a dragon" },
+            endpoint: "/hello",
+          }),
+        ).rejects.toThrow(/does not accept endpoint for single-shot/);
       },
     );
   });

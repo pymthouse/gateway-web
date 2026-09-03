@@ -88,13 +88,6 @@ export function resolveApp(
   return null;
 }
 
-/** Caller-supplied subpath only. Single-shot Live Runner execute is POST on the discovery URL. */
-export function endpointFor(_app: string, endpoint?: string): string {
-  if (!endpoint?.trim()) return "";
-  const ep = endpoint.trim();
-  return ep.startsWith("/") ? ep : `/${ep}`;
-}
-
 /** Suffix `/app` when the catalog published a bare runner base. Never rewrite `/session`. */
 export function normalizeAppBase(base: string): string {
   const trimmed = stripTrailingSlashes(base);

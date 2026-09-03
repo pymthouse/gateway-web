@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   advertisedMode,
-  endpointFor,
   instancesFromDiscovery,
   normalizeAppBase,
   pickInferencePool,
@@ -62,16 +61,6 @@ describe("select", () => {
     expect(normalizeAppBase("https://x/apps/flux")).toBe("https://x/apps/flux/app");
     expect(normalizeAppBase("https://x/apps/flux/app")).toBe("https://x/apps/flux/app");
     expect(normalizeAppBase("https://x/apps/flux/app/")).toBe("https://x/apps/flux/app");
-  });
-
-  it("endpointFor is empty unless the caller passed endpoint", () => {
-    expect(endpointFor("livepeer-example/fal-flux-schnell")).toBe("");
-    expect(endpointFor("livepeer-example/fal-grok-image-2")).toBe("");
-    expect(endpointFor("livepeer-example/fal-flux-schnell", "/hello")).toBe("/hello");
-    expect(endpointFor("livepeer-example/hello-world", "hello")).toBe("/hello");
-    expect(endpointFor("image-generation/black-forest-labs/FLUX.1-dev")).toBe("");
-    expect(endpointFor("vllm/qwen3-coder-30b")).toBe("");
-    expect(endpointFor("")).toBe("");
   });
 
   it("resolveApp: override, then exact capability === runner.app", () => {

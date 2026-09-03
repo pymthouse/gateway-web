@@ -429,7 +429,7 @@ describe("session", () => {
       });
       expect(res.mode).toBe("persistent");
       expect(res.data.message).toBe("Hello from persist");
-      expect(hits).toEqual(["single-shot", "reserve", "persistent-call", "stop"]);
+      expect(hits).toEqual(["reserve", "persistent-call", "stop"]);
     } finally {
       clearSignerInfoCache();
       await server.close();

@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { callRunner } from "./call-runner.js";
 import { discoverRunners } from "./discovery.js";
 import { LivepeerGatewayError, NoRunnerAvailableError } from "./errors.js";
-import { joinEndpoint } from "./http.js";
 import { capabilityMediaKind, extractMediaUrl } from "./media-url.js";
 import {
   DEFAULT_ORCH_CACHE_TTL_MS,
@@ -14,7 +13,6 @@ import {
 import { isRetryableRunnerFailure, rejectionReason } from "./runner-failover.js";
 import {
   advertisedMode,
-  endpointFor,
   instancesFromDiscovery,
   normalizeAppBase,
   pickInferencePool,
@@ -64,6 +62,7 @@ export interface InferenceRequest {
   timeout?: number;
   timeoutMs?: number;
   app?: string;
+  /** Persistent apps only — the HTTP path under `app_url` (e.g. `/hello`). */
   endpoint?: string;
   modelId?: string;
   model_id?: string;
@@ -94,6 +93,14 @@ function lastAppSegment(app: string): string {
   return slash >= 0 ? app.slice(slash + 1) : app;
 }
 
+function rejectSingleShotEndpoint(endpoint?: string): void {
+  if (endpoint?.trim()) {
+    throw new LivepeerGatewayError(
+      "runInference does not accept endpoint for single-shot capabilities; POST the discovery URL as published",
+    );
+  }
+}
+
 function requirePersistentEndpoint(app: string, endpoint?: string): string {
   const ep = endpoint?.trim();
   if (!ep) {
@@ -101,7 +108,16 @@ function requirePersistentEndpoint(app: string, endpoint?: string): string {
       `runInference requires endpoint for persistent app ${JSON.stringify(app)}`,
     );
   }
-  return ep;
+  return ep.startsWith("/") ? ep : `/${ep}`;
+}
+
+function rejectEndpointForSingleShotPool(
+  runners: LiveRunnerInstance[],
+  endpoint?: string,
+): void {
+  if (!endpoint?.trim()) return;
+  if (runners.some((r) => advertisedMode(r.mode) === "persistent")) return;
+  rejectSingleShotEndpoint(endpoint);
 }
 
 function buildPayload(req: InferenceRequest): Record<string, unknown> {
@@ -241,9 +257,8 @@ export function createGateway(config: GatewayConfig): Gateway {
     timeoutMs: number,
     gatewayRequestId: string,
   ) {
-    const endpoint = endpointFor(runner.app, req.endpoint);
-    const base = normalizeAppBase(runner.url);
-    const runnerUrl = endpoint ? joinEndpoint(base, endpoint) : base;
+    rejectSingleShotEndpoint(req.endpoint);
+    const runnerUrl = normalizeAppBase(runner.url);
     const result = await callRunner({
       runnerUrl,
       runner,
@@ -313,15 +328,29 @@ export function createGateway(config: GatewayConfig): Gateway {
       }
 
       const { cacheKey, runners } = cachedInferencePool(entries, app, req.capability);
+      rejectEndpointForSingleShotPool(runners, req.endpoint);
       if (runners.every((r) => advertisedMode(r.mode) === "persistent")) {
         requirePersistentEndpoint(app, req.endpoint);
+      }
+
+      const endpointProvided = Boolean(req.endpoint?.trim());
+      const attemptRunners = runners.filter((runner) => {
+        const mode = advertisedMode(runner.mode);
+        return endpointProvided ? mode === "persistent" : mode === "single-shot";
+      });
+      if (attemptRunners.length === 0) {
+        throw new NoRunnerAvailableError(
+          endpointProvided
+            ? `no persistent runner for app ${app} in discovery`
+            : `no single-shot runner for app ${app} in discovery`,
+        );
       }
 
       const payload = buildPayload(req);
       const rejections: Array<{ url: string; reason: string }> = [];
       let lastError: unknown;
 
-      for (const runner of runners) {
+      for (const runner of attemptRunners) {
         const mode = advertisedMode(runner.mode);
         try {
           const result =
@@ -348,7 +377,7 @@ export function createGateway(config: GatewayConfig): Gateway {
 
       orchCache.delete(cacheKey);
       throw new NoRunnerAvailableError(
-        `all ${runners.length} orchestrator(s) failed for capability ${JSON.stringify(req.capability)}` +
+        `all ${attemptRunners.length} orchestrator(s) failed for capability ${JSON.stringify(req.capability)}` +
           (lastError instanceof Error ? `: ${lastError.message}` : ""),
         rejections,
       );

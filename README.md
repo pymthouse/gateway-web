@@ -4,7 +4,7 @@ Minimal Node.js client for Livepeer **live-runner** inference: single-shot HTTP 
 
 Ports the dispatch path that the Python SDK service uses: discover runners, pick by the **advertised** runner mode, pay a 402 challenge via a remote signer, and return the runner's JSON (with a media URL extracted). Persistent runners keep the discovery `/session` URL, reserve a session, POST `{app_url}{endpoint}`, then `POST {control_url}/stop`.
 
-`runInference` considers both modes and dispatches per runner. Persistent apps **must** pass `endpoint` — it is not advertised and cannot be guessed from the app id. Missing `endpoint` fails **before** reserve so you are not billed for a session that then 404s.
+`runInference` considers both modes and dispatches per runner. Single-shot capabilities POST the discovery URL as published — `endpoint` is rejected. Persistent apps **must** pass `endpoint` — it is not advertised and cannot be guessed from the app id. Missing `endpoint` fails **before** reserve so you are not billed for a session that then 404s.
 
 `runInference` against a persistent runner is `reserve → one call → stop`. Each invocation pays a full reserve; the isolate cannot reuse the session across calls. Hold a session yourself with `reserveSession` / `callSession` / `stopSession` when you need more than one HTTP round-trip.
 
