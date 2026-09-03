@@ -36,6 +36,28 @@ describe("extractMediaUrl", () => {
     expect(extractMediaUrl({ weird: "https://a/x.bin" })).toBe("https://a/x.bin");
   });
 
+  it("does not treat fal queue control URLs as media", () => {
+    expect(
+      extractMediaUrl({
+        request_id: "req-123",
+        status: "IN_QUEUE",
+        status_url: "https://queue.fal.run/fal-ai/flux/requests/req-123/status",
+        response_url: "https://queue.fal.run/fal-ai/flux/requests/req-123",
+        cancel_url: "https://queue.fal.run/fal-ai/flux/requests/req-123/cancel",
+      }),
+    ).toBeNull();
+    expect(
+      extractMediaUrl({
+        endpoint_id: "fal-ai/flux/schnell",
+        output: {
+          request_id: "req-123",
+          status_url: "https://queue.fal.run/fal-ai/flux/requests/req-123/status",
+        },
+        request_id: "req-123",
+      }),
+    ).toBeNull();
+  });
+
   it("returns null for empty", () => {
     expect(extractMediaUrl(null)).toBeNull();
     expect(extractMediaUrl({})).toBeNull();

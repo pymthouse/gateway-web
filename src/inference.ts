@@ -4,6 +4,7 @@ import { callRunner } from "./call-runner.js";
 import { discoverRunners } from "./discovery.js";
 import { LivepeerGatewayError, NoRunnerAvailableError } from "./errors.js";
 import { capabilityMediaKind, extractMediaUrl } from "./media-url.js";
+import { awaitQueuedResult, extractQueueHandle, type QueueProgress } from "./queue.js";
 import {
   DEFAULT_ORCH_CACHE_TTL_MS,
   MAX_ORCHESTRATOR_CACHE,
@@ -71,6 +72,8 @@ export interface InferenceRequest {
    * always returned on the result so the caller can join it to metering.
    */
   gatewayRequestId?: string;
+  /** Fired while a fal queue receipt is polled to completion. */
+  onProgress?: (info: QueueProgress) => void | Promise<void>;
 }
 
 export interface InferenceResult {
@@ -86,6 +89,12 @@ export interface InferenceResult {
   audioUrl: string | null;
   /** The id carried on this call's payment tickets. */
   gatewayRequestId: string;
+  /** Queue/provider status when the runner returned a receipt instead of media. */
+  status: string | null;
+  /** Upstream fal (or runner) request id, when the body carried one. */
+  providerRequestId: string | null;
+  statusUrl: string | null;
+  responseUrl: string | null;
 }
 
 function lastAppSegment(app: string): string {
@@ -111,10 +120,7 @@ function requirePersistentEndpoint(app: string, endpoint?: string): string {
   return ep.startsWith("/") ? ep : `/${ep}`;
 }
 
-function rejectEndpointForSingleShotPool(
-  runners: LiveRunnerInstance[],
-  endpoint?: string,
-): void {
+function rejectEndpointForSingleShotPool(runners: LiveRunnerInstance[], endpoint?: string): void {
   if (!endpoint?.trim()) return;
   if (runners.some((r) => advertisedMode(r.mode) === "persistent")) return;
   rejectSingleShotEndpoint(endpoint);
@@ -160,6 +166,7 @@ function buildInferenceResult(options: {
 }): InferenceResult {
   const url = extractMediaUrl(options.data) ?? extractMediaUrl({ data: options.data });
   const kind = capabilityMediaKind(options.req.capability);
+  const handle = extractQueueHandle(options.data, options.runnerUrl);
   return {
     url,
     data: options.data,
@@ -172,6 +179,10 @@ function buildInferenceResult(options: {
     videoUrl: kind === "video" ? url : null,
     audioUrl: kind === "audio" ? url : null,
     gatewayRequestId: options.gatewayRequestId,
+    status: url ? "completed" : (handle?.status ?? null),
+    providerRequestId: handle?.requestId ?? null,
+    statusUrl: url ? null : (handle?.statusUrl ?? null),
+    responseUrl: url ? null : (handle?.responseUrl ?? null),
   };
 }
 
@@ -357,11 +368,18 @@ export function createGateway(config: GatewayConfig): Gateway {
             mode === "persistent"
               ? await runPersistent(runner, req, payload, timeoutMs, gatewayRequestId)
               : await runSingleShot(runner, req, payload, timeoutMs, gatewayRequestId);
+          const remainingMs = Math.max(1, timeoutMs - (Date.now() - t0));
+          const data = await awaitQueuedResult(result.data, {
+            timeoutMs: remainingMs,
+            insecureTls,
+            runnerUrl: result.runnerUrl,
+            onProgress: req.onProgress,
+          });
           return buildInferenceResult({
             req,
             runner,
             runnerUrl: result.runnerUrl,
-            data: result.data,
+            data,
             t0,
             gatewayRequestId,
           });

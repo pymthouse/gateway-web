@@ -69,7 +69,10 @@ function liveRunnerHandler(opts: {
   };
 }
 
-async function withGateway(handler: MockHandler, run: (gw: Gateway) => Promise<void>): Promise<void> {
+async function withGateway(
+  handler: MockHandler,
+  run: (gw: Gateway) => Promise<void>,
+): Promise<void> {
   const server = await startMockServer(handler);
   try {
     clearSignerInfoCache();
@@ -208,12 +211,7 @@ describe("runInference", () => {
           {
             address: `${origin}/orch-flux`,
             runners: [
-              runner(
-                origin,
-                "image-generation/black-forest-labs/FLUX.1-dev",
-                "/apps/flux",
-                "flux",
-              ),
+              runner(origin, "image-generation/black-forest-labs/FLUX.1-dev", "/apps/flux", "flux"),
             ],
           },
           {
@@ -303,5 +301,74 @@ describe("runInference", () => {
         expect(hits.n).toBe(2);
       },
     );
+  });
+
+  it("polls a fal queue receipt until the media URL lands", async () => {
+    const hits = { n: 0 };
+    let statusHits = 0;
+    const app = "livepeer-example/fal-ray-32-t2v";
+    const server = await startMockServer((req, res) => {
+      if (req.pathname === "/discover-orchestrators") {
+        json(res, 200, [
+          {
+            address: req.url.origin,
+            runners: [runner(req.url.origin, app, "/apps/ray/app", "r1")],
+          },
+        ]);
+        return;
+      }
+      if (replySignerPayment(req, res, {})) return;
+      if (req.pathname === "/apps/ray/app") {
+        hits.n += 1;
+        if (hits.n === 1) {
+          json(res, 402, {
+            payment_params: "p",
+            manifest_id: "m",
+            payment_url: `${req.url.origin}/pay`,
+          });
+          return;
+        }
+        json(res, 200, {
+          endpoint_id: "luma/agent/ray/v3.2/text-to-video",
+          request_id: "req-ray",
+          schema_sha256: "a".repeat(64),
+          output: {
+            request_id: "req-ray",
+            status: "IN_QUEUE",
+            status_url: `${req.url.origin}/queue/req-ray/status`,
+            response_url: `${req.url.origin}/queue/req-ray`,
+          },
+        });
+        return;
+      }
+      if (req.pathname === "/queue/req-ray/status") {
+        statusHits += 1;
+        json(res, 200, {
+          status: statusHits < 2 ? "IN_PROGRESS" : "COMPLETED",
+          request_id: "req-ray",
+        });
+        return;
+      }
+      if (req.pathname === "/queue/req-ray") {
+        json(res, 200, { video: { url: "https://cdn.example/out.mp4" } });
+        return;
+      }
+      json(res, 404, { error: { message: req.pathname } });
+    });
+    try {
+      clearSignerInfoCache();
+      const gw = createGateway({ signerUrl: server.origin, timeoutMs: 5_000 });
+      const res = await gw.runInference({
+        capability: app,
+        params: { prompt: "a dragon" },
+      });
+      expect(res.url).toBe("https://cdn.example/out.mp4");
+      expect(res.videoUrl).toBe("https://cdn.example/out.mp4");
+      expect(res.status).toBe("completed");
+      expect(statusHits).toBeGreaterThanOrEqual(2);
+    } finally {
+      clearSignerInfoCache();
+      await server.close();
+    }
   });
 });
