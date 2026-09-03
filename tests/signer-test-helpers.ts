@@ -9,6 +9,8 @@ import { json, startMockServer, type MockHandler, type MockRequest } from "./moc
 
 export const MOCK_SIGNER = { address: "0xabc", signature: "0xsig" } as const;
 
+const DEFAULT_PAYMENT_STATE: Record<string, unknown> = { n: 1 };
+
 export function replySignOrchestratorInfo(req: MockRequest, res: ServerResponse): boolean {
   if (req.pathname === "/sign-orchestrator-info") {
     json(res, 200, MOCK_SIGNER);
@@ -20,7 +22,7 @@ export function replySignOrchestratorInfo(req: MockRequest, res: ServerResponse)
 export function replySignerPayment(
   req: MockRequest,
   res: ServerResponse,
-  paymentState: Record<string, unknown> = { n: 1 },
+  paymentState: Record<string, unknown> = DEFAULT_PAYMENT_STATE,
 ): boolean {
   if (replySignOrchestratorInfo(req, res)) return true;
   if (req.pathname === "/generate-live-payment") {
