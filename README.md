@@ -80,9 +80,9 @@ rows as `gateway_request_id` / `attribution_source`. That is what lets a caller
 join a job it made to what that job actually cost.
 
 `runInference` generates a `gatewayRequestId` when you do not supply one and
-always returns it on the result. Pass your own when you need the id **before**
-the call — e.g. to record a prompt against it, or to attribute a call that pays
-tickets and then fails.
+always returns it on the result. Failures after mint attach the same id on
+`LivepeerGatewayError.gatewayRequestId` so a paid-then-failed call is still
+joinable. Pass your own when you need the id **before** the call.
 
 `attributionSource` belongs on `createGateway` because it names the gateway
 stack, not the job. PymtHouse documents the vocabulary as `pymthouse_gateway |

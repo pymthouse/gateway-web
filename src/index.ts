@@ -6,6 +6,7 @@ export {
   RemoteSignerError,
   SignerRefreshRequired,
   SkipPaymentCycle,
+  attachGatewayRequestId,
 } from "./errors.js";
 export type { RunnerRejection } from "./errors.js";
 
@@ -57,7 +58,12 @@ export type {
 } from "./session.js";
 
 export { extractMediaUrl, mediaKind, capabilityMediaKind, isQueueControlUrl } from "./media-url.js";
-export { awaitQueuedResult, extractQueueHandle, DEFAULT_QUEUE_POLL_INTERVAL_MS } from "./queue.js";
+export {
+  awaitQueuedResult,
+  extractQueueHandle,
+  isAllowedQueuePollUrl,
+  DEFAULT_QUEUE_POLL_INTERVAL_MS,
+} from "./queue.js";
 export type { AwaitQueueOptions, QueueHandle, QueueProgress } from "./queue.js";
 
 export { getSignerInfo, LivePaymentSession, PAYMENT_INTERVAL_MS } from "./signer.js";

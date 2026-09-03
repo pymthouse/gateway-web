@@ -1,7 +1,7 @@
 import type { ServerResponse } from "node:http";
 import { describe, expect, it } from "vitest";
 import { NoRunnerAvailableError, LivepeerGatewayError } from "../src/errors.js";
-import { createGateway, type Gateway } from "../src/inference.js";
+import { createGateway, type Gateway, type GatewayConfig } from "../src/inference.js";
 import { clearSignerInfoCache } from "../src/signer.js";
 import { json, startMockServer, type MockHandler, type MockRequest } from "./mock-server.js";
 import { replySignerPayment } from "./signer-test-helpers.js";
@@ -49,6 +49,7 @@ function lookupPath<T>(table: Record<string, T> | undefined, pathname: string): 
 function liveRunnerHandler(opts: {
   catalog: (origin: string) => unknown[];
   onDiscover?: (req: MockRequest) => void;
+  onPayment?: (body: Record<string, unknown>) => void;
   failPaths?: Record<string, unknown>;
   paidPaths: Record<
     string,
@@ -61,7 +62,7 @@ function liveRunnerHandler(opts: {
       json(res, 200, opts.catalog(req.url.origin));
       return;
     }
-    if (replySignerPayment(req, res, {})) return;
+    if (replySignerPayment(req, res, {}, opts.onPayment)) return;
     const failBody = lookupPath(opts.failPaths, req.pathname);
     if (failBody !== undefined) {
       json(res, 500, failBody);
@@ -79,6 +80,7 @@ function liveRunnerHandler(opts: {
 async function withGateway(
   handler: MockHandler,
   run: (gw: Gateway) => Promise<void>,
+  config?: Partial<GatewayConfig>,
 ): Promise<void> {
   const server = await startMockServer(handler);
   try {
@@ -87,6 +89,7 @@ async function withGateway(
       createGateway({
         signerUrl: server.origin,
         timeoutMs: 5_000,
+        ...config,
       }),
     );
   } finally {
@@ -422,5 +425,62 @@ describe("runInference", () => {
       clearSignerInfoCache();
       await server.close();
     }
+  });
+
+  it("stamps gatewayRequestId and attributionSource on the payment POST", async () => {
+    const hits = { n: 0 };
+    const payments: Array<Record<string, unknown>> = [];
+    const app = "livepeer-example/fal-flux-schnell";
+    await withGateway(
+      liveRunnerHandler({
+        catalog: (origin) => [
+          { address: origin, runners: [runner(origin, app, "/apps/flux/app", "r1")] },
+        ],
+        onPayment: (body) => payments.push(body),
+        paidPaths: {
+          "/apps/flux/app": {
+            hits,
+            success: { images: [{ url: "https://cdn.example/out.jpg" }] },
+          },
+        },
+      }),
+      async (gw) => {
+        const res = await gw.runInference({
+          capability: app,
+          params: { prompt: "a dragon" },
+          gatewayRequestId: "job_abc123",
+        });
+        expect(res.gatewayRequestId).toBe("job_abc123");
+        expect(payments.length).toBeGreaterThan(0);
+        expect(payments[0]?.gatewayRequestId).toBe("job_abc123");
+        expect(payments[0]?.attributionSource).toBe("pymthouse_gateway");
+      },
+      { attributionSource: "pymthouse_gateway" },
+    );
+  });
+
+  it("attaches gatewayRequestId on a thrown error after mint", async () => {
+    const app = "livepeer-example/fal-flux-schnell";
+    await withGateway(
+      liveRunnerHandler({
+        catalog: (origin) => [
+          { address: origin, runners: [runner(origin, app, "/apps/flux/app", "r1")] },
+        ],
+        failPaths: { "/apps/flux/app": { error: "CUDA error" } },
+        paidPaths: {},
+      }),
+      async (gw) => {
+        await expect(
+          gw.runInference({
+            capability: app,
+            params: { prompt: "a dragon" },
+            gatewayRequestId: "job_fail_1",
+          }),
+        ).rejects.toMatchObject({
+          name: "NoRunnerAvailableError",
+          gatewayRequestId: "job_fail_1",
+        });
+      },
+    );
   });
 });
