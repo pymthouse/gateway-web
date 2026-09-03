@@ -4,6 +4,7 @@ import { LivepeerGatewayError, LivepeerHTTPError } from "../src/errors.js";
 import { clearSignerInfoCache } from "../src/signer.js";
 import type { LiveRunnerInstance } from "../src/types.js";
 import { json, startMockServer } from "./mock-server.js";
+import { replySignOrchestratorInfo } from "./signer-test-helpers.js";
 
 function runner(overrides: Partial<LiveRunnerInstance> = {}): LiveRunnerInstance {
   return {
@@ -42,10 +43,7 @@ describe("callRunner", () => {
   it("402 → pay → retry → 200", async () => {
     let generateHits = 0;
     const server = await startMockServer((req, res) => {
-      if (req.pathname === "/sign-orchestrator-info") {
-        json(res, 200, { address: "0xabc", signature: "0xsig" });
-        return;
-      }
+      if (replySignOrchestratorInfo(req, res)) return;
       if (req.pathname === "/generate-live-payment") {
         const body = req.json() as Record<string, unknown>;
         expect(body.orchestrator).toBe("opaque-params");
@@ -97,10 +95,7 @@ describe("callRunner", () => {
 
   it("exhausts payment challenge retries", async () => {
     const server = await startMockServer((req, res) => {
-      if (req.pathname === "/sign-orchestrator-info") {
-        json(res, 200, { address: "0xabc", signature: "0xsig" });
-        return;
-      }
+      if (replySignOrchestratorInfo(req, res)) return;
       if (req.pathname === "/generate-live-payment") {
         json(res, 200, { payment: "PAY", segCreds: "SEG", state: {} });
         return;
@@ -130,10 +125,7 @@ describe("callRunner", () => {
 
   it("non-402 errors propagate", async () => {
     const server = await startMockServer((req, res) => {
-      if (req.pathname === "/sign-orchestrator-info") {
-        json(res, 200, { address: "0xabc", signature: "0xsig" });
-        return;
-      }
+      if (replySignOrchestratorInfo(req, res)) return;
       json(res, 500, { error: { message: "boom" } });
     });
     try {

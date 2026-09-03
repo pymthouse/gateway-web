@@ -4,6 +4,7 @@ import { NoRunnerAvailableError } from "../src/errors.js";
 import { createGateway, type Gateway } from "../src/inference.js";
 import { clearSignerInfoCache } from "../src/signer.js";
 import { json, startMockServer, type MockHandler, type MockRequest } from "./mock-server.js";
+import { replySignerPayment } from "./signer-test-helpers.js";
 
 const PRICE = { price: 1, currency: "usd", unit: "fixed" } as const;
 
@@ -15,18 +16,6 @@ function runner(origin: string, app: string, path: string, runnerId: string) {
     runner_id: runnerId,
     price_info: PRICE,
   };
-}
-
-function replySignerPayment(req: MockRequest, res: ServerResponse): boolean {
-  if (req.pathname === "/sign-orchestrator-info") {
-    json(res, 200, { address: "0xabc", signature: "0xsig" });
-    return true;
-  }
-  if (req.pathname === "/generate-live-payment") {
-    json(res, 200, { payment: "PAY", segCreds: "SEG", state: {} });
-    return true;
-  }
-  return false;
 }
 
 /** First hit: 402 challenge. Later hits: 200 with `success`. */
@@ -65,7 +54,7 @@ function liveRunnerHandler(opts: {
       json(res, 200, opts.catalog(req.url.origin));
       return;
     }
-    if (replySignerPayment(req, res)) return;
+    if (replySignerPayment(req, res, {})) return;
     const failBody = opts.failPaths?.[req.pathname];
     if (failBody !== undefined) {
       json(res, 500, failBody);

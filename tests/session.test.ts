@@ -5,6 +5,7 @@ import { callSession, reserveSession, stopSession } from "../src/session.js";
 import { clearSignerInfoCache, PAYMENT_INTERVAL_MS } from "../src/signer.js";
 import type { LiveRunnerInstance } from "../src/types.js";
 import { json, startMockServer, type MockRequest } from "./mock-server.js";
+import { replySignerPayment, replySignOrchestratorInfo } from "./signer-test-helpers.js";
 
 function persistentRunner(
   origin: string,
@@ -20,18 +21,6 @@ function persistentRunner(
     priceInfo: { price: 1, currency: "usd", unit: "seconds" },
     ...overrides,
   };
-}
-
-function signerHandlers(req: { pathname: string }, res: Parameters<typeof json>[0]): boolean {
-  if (req.pathname === "/sign-orchestrator-info") {
-    json(res, 200, { address: "0xabc", signature: "0xsig" });
-    return true;
-  }
-  if (req.pathname === "/generate-live-payment") {
-    json(res, 200, { payment: "PAY", segCreds: "SEG", state: { n: 1 } });
-    return true;
-  }
-  return false;
 }
 
 function persistentHelloCatalog(origin: string) {
@@ -80,7 +69,7 @@ describe("session", () => {
   it("reserve POSTs the discovery URL unmodified and parses all three fields", async () => {
     const reserved: string[] = [];
     const server = await startMockServer((req, res) => {
-      if (signerHandlers(req, res)) return;
+      if (replySignerPayment(req, res)) return;
       if (req.pathname === "/apps/hello/session") {
         reserved.push(req.pathname);
         json(res, 200, helloSessionBody(req.url.origin));
@@ -112,7 +101,7 @@ describe("session", () => {
 
   it("reserve throws when control_url is missing", async () => {
     const server = await startMockServer((req, res) => {
-      if (signerHandlers(req, res)) return;
+      if (replySignerPayment(req, res)) return;
       if (req.pathname === "/apps/hello/session") {
         json(res, 200, {
           session_id: "sess-1",
@@ -141,7 +130,7 @@ describe("session", () => {
   it("402 on reserve pays and retries", async () => {
     let sessionHits = 0;
     const server = await startMockServer((req, res) => {
-      if (signerHandlers(req, res)) return;
+      if (replySignerPayment(req, res)) return;
       if (req.pathname === "/apps/hello/session") {
         sessionHits += 1;
         if (sessionHits === 1) {
@@ -178,7 +167,7 @@ describe("session", () => {
   it("stop POSTs control_url/stop and is idempotent", async () => {
     const stops: string[] = [];
     const server = await startMockServer((req, res) => {
-      if (signerHandlers(req, res)) return;
+      if (replySignerPayment(req, res)) return;
       if (req.pathname === "/apps/hello/session") {
         json(res, 200, helloSessionBody(req.url.origin));
         return;
@@ -212,7 +201,7 @@ describe("session", () => {
 
   it("callSession requires endpoint and POSTs app_url + path", async () => {
     const server = await startMockServer((req, res) => {
-      if (signerHandlers(req, res)) return;
+      if (replySignerPayment(req, res)) return;
       if (req.pathname === "/apps/hello/session") {
         json(res, 200, helloSessionBody(req.url.origin));
         return;
@@ -257,10 +246,7 @@ describe("session", () => {
     let payments = 0;
     let payPosts = 0;
     const server = await startMockServer((req, res) => {
-      if (req.pathname === "/sign-orchestrator-info") {
-        json(res, 200, { address: "0xabc", signature: "0xsig" });
-        return;
-      }
+      if (replySignOrchestratorInfo(req, res)) return;
       if (req.pathname === "/generate-live-payment") {
         payments += 1;
         json(res, 200, { payment: "PAY", segCreds: "SEG", state: { n: payments } });
@@ -314,7 +300,7 @@ describe("session", () => {
     const hits: string[] = [];
     const server = await startMockServer((req, res) => {
       if (handlePersistentHelloDiscover(req, res)) return;
-      if (signerHandlers(req, res)) return;
+      if (replySignerPayment(req, res)) return;
       if (handleHelloSessionOk(req, res, () => hits.push("reserve"))) return;
       if (req.pathname === "/apps/hello/app/hello") {
         hits.push("call");
@@ -349,7 +335,7 @@ describe("session", () => {
     const hits: string[] = [];
     const server = await startMockServer((req, res) => {
       if (handlePersistentHelloDiscover(req, res)) return;
-      if (signerHandlers(req, res)) return;
+      if (replySignerPayment(req, res)) return;
       if (handleHelloSessionOk(req, res, () => hits.push("reserve"))) return;
       if (req.pathname === "/apps/hello/app/hello") {
         hits.push("call");
@@ -411,7 +397,7 @@ describe("session", () => {
         ]);
         return;
       }
-      if (signerHandlers(req, res)) return;
+      if (replySignerPayment(req, res)) return;
       if (req.pathname === "/apps/hello-shot/app/hello") {
         hits.push("single-shot");
         json(res, 500, { error: "CUDA error" });
@@ -454,7 +440,7 @@ describe("session", () => {
     const hits: string[] = [];
     const server = await startMockServer((req, res) => {
       if (handlePersistentHelloDiscover(req, res)) return;
-      if (signerHandlers(req, res)) return;
+      if (replySignerPayment(req, res)) return;
       if (handleHelloSessionOk(req, res, () => hits.push("reserve"))) return;
       json(res, 404, { error: { message: req.pathname } });
     });
@@ -475,10 +461,7 @@ describe("session", () => {
     let payments = 0;
     let sessionHits = 0;
     const server = await startMockServer((req, res) => {
-      if (req.pathname === "/sign-orchestrator-info") {
-        json(res, 200, { address: "0xabc", signature: "0xsig" });
-        return;
-      }
+      if (replySignOrchestratorInfo(req, res)) return;
       if (req.pathname === "/generate-live-payment") {
         payments += 1;
         json(res, 200, { payment: "PAY", segCreds: "SEG", state: { n: payments } });

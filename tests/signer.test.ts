@@ -1,52 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { PaymentError, SignerRefreshRequired } from "../src/errors.js";
-import {
-  clearSignerInfoCache,
-  getSignerInfo,
-  LivePaymentSession,
-  type LivePaymentSessionOptions,
-} from "../src/signer.js";
+import { clearSignerInfoCache, getSignerInfo, LivePaymentSession } from "../src/signer.js";
 import { json, startMockServer } from "./mock-server.js";
-
-function fixedChallenge(origin: string) {
-  return {
-    paymentParams: "params-1",
-    manifestId: "man-1",
-    paymentUrl: `${origin}/pay`,
-  };
-}
-
-async function withCapturedMints(
-  extra: Partial<LivePaymentSessionOptions>,
-  run: (
-    session: LivePaymentSession,
-    bodies: Array<Record<string, unknown>>,
-    origin: string,
-  ) => Promise<void>,
-): Promise<void> {
-  const bodies: Array<Record<string, unknown>> = [];
-  const server = await startMockServer((req, res) => {
-    if (req.pathname === "/generate-live-payment") {
-      bodies.push(req.json() as Record<string, unknown>);
-      json(res, 200, { payment: "pay-1", segCreds: "seg-1", state: { n: 1 } });
-      return;
-    }
-    json(res, 404, { error: { message: req.pathname } });
-  });
-  try {
-    clearSignerInfoCache();
-    const session = new LivePaymentSession({
-      signerUrl: server.origin,
-      type: "fixed",
-      challenge: fixedChallenge(server.origin),
-      ...extra,
-    });
-    await run(session, bodies, server.origin);
-  } finally {
-    clearSignerInfoCache();
-    await server.close();
-  }
-}
+import {
+  fixedChallenge,
+  replySignOrchestratorInfo,
+  shortChallenge,
+  withCapturedMints,
+  withLivePaymentSession,
+} from "./signer-test-helpers.js";
 
 describe("signer", () => {
   it("getSignerInfo posts /sign-orchestrator-info and caches", async () => {
@@ -73,10 +35,7 @@ describe("signer", () => {
     let payHits = 0;
     let refreshHits = 0;
     const server = await startMockServer((req, res) => {
-      if (req.pathname === "/sign-orchestrator-info") {
-        json(res, 200, { address: "0xabc", signature: "0xsig" });
-        return;
-      }
+      if (replySignOrchestratorInfo(req, res)) return;
       if (req.pathname === "/generate-live-payment") {
         payHits += 1;
         const body = req.json() as Record<string, unknown>;
@@ -118,11 +77,7 @@ describe("signer", () => {
       const session = new LivePaymentSession({
         signerUrl: server.origin,
         type: "fixed",
-        challenge: {
-          paymentParams: "params-1",
-          manifestId: "man-1",
-          paymentUrl: `${server.origin}/pay`,
-        },
+        challenge: fixedChallenge(server.origin),
       });
       const first = await session.getPayment();
       expect(first).toEqual({ payment: "pay-1", segCreds: "seg-1" });
@@ -189,11 +144,7 @@ describe("signer", () => {
         type: "live",
         app: "livepeer-example/realtime-transcription",
         maxPrice: { price: 0.01, currency: "usd", unit: "hour" },
-        challenge: {
-          paymentParams: "params-1",
-          manifestId: "man-1",
-          paymentUrl: `${server.origin}/pay`,
-        },
+        challenge: fixedChallenge(server.origin),
       });
       await first.getPayment();
       const snap = first.snapshot();
@@ -212,50 +163,34 @@ describe("signer", () => {
   });
 
   it("480 with no prior state is not retried", async () => {
-    const server = await startMockServer((req, res) => {
-      if (req.pathname === "/generate-live-payment") {
-        json(res, 480, {});
-        return;
-      }
-      json(res, 404, {});
-    });
-    try {
-      const session = new LivePaymentSession({
-        signerUrl: server.origin,
-        type: "live",
-        challenge: {
-          paymentParams: "p",
-          manifestId: "m",
-          paymentUrl: `${server.origin}/pay`,
-        },
-      });
-      await expect(session.getPayment()).rejects.toBeInstanceOf(SignerRefreshRequired);
-    } finally {
-      await server.close();
-    }
+    await withLivePaymentSession(
+      (req, res) => {
+        if (req.pathname === "/generate-live-payment") {
+          json(res, 480, {});
+          return;
+        }
+        json(res, 404, {});
+      },
+      (origin) => ({ type: "live", challenge: shortChallenge(origin) }),
+      async (session) => {
+        await expect(session.getPayment()).rejects.toBeInstanceOf(SignerRefreshRequired);
+      },
+    );
   });
 
   it("missing payment field is PaymentError", async () => {
-    const server = await startMockServer((req, res) => {
-      if (req.pathname === "/generate-live-payment") {
-        json(res, 200, { state: {} });
-        return;
-      }
-      json(res, 404, {});
-    });
-    try {
-      const session = new LivePaymentSession({
-        signerUrl: server.origin,
-        type: "live",
-        challenge: {
-          paymentParams: "p",
-          manifestId: "m",
-          paymentUrl: `${server.origin}/pay`,
-        },
-      });
-      await expect(session.getPayment()).rejects.toBeInstanceOf(PaymentError);
-    } finally {
-      await server.close();
-    }
+    await withLivePaymentSession(
+      (req, res) => {
+        if (req.pathname === "/generate-live-payment") {
+          json(res, 200, { state: {} });
+          return;
+        }
+        json(res, 404, {});
+      },
+      (origin) => ({ type: "live", challenge: shortChallenge(origin) }),
+      async (session) => {
+        await expect(session.getPayment()).rejects.toBeInstanceOf(PaymentError);
+      },
+    );
   });
 });
