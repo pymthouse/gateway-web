@@ -17,12 +17,56 @@ describe("extractMediaUrl", () => {
     expect(extractMediaUrl({ data: { data: { url: "https://a/i.png" } } })).toBe("https://a/i.png");
   });
 
+  it("reads runner receipt output.images[0].url", () => {
+    expect(
+      extractMediaUrl({
+        request_id: "req-123",
+        endpoint_id: "xai/grok-imagine-image/v2.0/text-to-image",
+        schema_sha256: "a".repeat(64),
+        output: { images: [{ url: "https://cdn.example/grok.png" }] },
+      }),
+    ).toBe("https://cdn.example/grok.png");
+  });
+
+  it("reads runner receipt output.video.url", () => {
+    expect(
+      extractMediaUrl({
+        request_id: "req-ray",
+        endpoint_id: "luma/agent/ray/v3.2/text-to-video",
+        schema_sha256: "a".repeat(64),
+        output: { video: { url: "https://cdn.example/out.mp4" } },
+      }),
+    ).toBe("https://cdn.example/out.mp4");
+  });
+
   it("reads meshy model_urls", () => {
     expect(extractMediaUrl({ model_urls: { glb: "https://a/m.glb" } })).toBe("https://a/m.glb");
   });
 
   it("falls back to any http(s) string", () => {
     expect(extractMediaUrl({ weird: "https://a/x.bin" })).toBe("https://a/x.bin");
+  });
+
+  it("does not treat fal queue control URLs as media", () => {
+    expect(
+      extractMediaUrl({
+        request_id: "req-123",
+        status: "IN_QUEUE",
+        status_url: "https://queue.fal.run/fal-ai/flux/requests/req-123/status",
+        response_url: "https://queue.fal.run/fal-ai/flux/requests/req-123",
+        cancel_url: "https://queue.fal.run/fal-ai/flux/requests/req-123/cancel",
+      }),
+    ).toBeNull();
+    expect(
+      extractMediaUrl({
+        endpoint_id: "fal-ai/flux/schnell",
+        output: {
+          request_id: "req-123",
+          status_url: "https://queue.fal.run/fal-ai/flux/requests/req-123/status",
+        },
+        request_id: "req-123",
+      }),
+    ).toBeNull();
   });
 
   it("returns null for empty", () => {

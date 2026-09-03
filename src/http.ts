@@ -158,6 +158,23 @@ async function readResponseBody(body: AsyncIterable<Buffer | string>): Promise<B
   return Buffer.concat(chunks);
 }
 
+function isRedirectStatus(status: number): boolean {
+  return status >= 300 && status < 400;
+}
+
+function assertJsonSubmitHasBody(
+  method: string,
+  sentBody: string | undefined,
+  raw: Buffer,
+  requestUrl: string,
+  status: number,
+): void {
+  if (method !== "POST" || sentBody === undefined || raw.length > 0) return;
+  throw new LivepeerGatewayError(
+    `HTTP JSON error: empty body from submit (url=${requestUrl}, status=${status})`,
+  );
+}
+
 function rethrowHttpFailure(e: unknown, url: string): never {
   if (
     e instanceof SignerRefreshRequired ||
@@ -191,8 +208,7 @@ export async function requestBody(
 }> {
   const timeoutMs = options.timeoutMs ?? 5_000;
   const { method, headers, body } = jsonRequestParts(options);
-  const parsed = parseHttpUrl(url);
-  const requestUrl = parsed.toString();
+  const requestUrl = parseHttpUrl(url).toString();
   try {
     const res = await request(requestUrl, {
       method,
@@ -207,9 +223,10 @@ export async function requestBody(
     const contentType =
       typeof res.headers["content-type"] === "string" ? res.headers["content-type"] : "";
     const responseHeaders = res.headers as HttpHeaderBag;
-    if (res.statusCode >= 400) {
+    if (isRedirectStatus(res.statusCode) || res.statusCode >= 400) {
       raiseHttpJsonError(res.statusCode, requestUrl, raw.toString("utf8"), responseHeaders);
     }
+    assertJsonSubmitHasBody(method, body, raw, requestUrl, res.statusCode);
     return {
       body: raw,
       contentType,

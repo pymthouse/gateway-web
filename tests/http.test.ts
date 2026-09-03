@@ -70,4 +70,50 @@ describe("http", () => {
       await server.close();
     }
   });
+
+  it("POST 301 same-origin Location is a failed submit", async () => {
+    const server = await startMockServer((req, res) => {
+      if (req.pathname === "/app") {
+        res.writeHead(301, { Location: "/app/" });
+        res.end();
+        return;
+      }
+      json(res, 200, { ok: true });
+    });
+    try {
+      await expect(postJson(`${server.origin}/app`, { prompt: "x" })).rejects.toBeInstanceOf(
+        LivepeerHTTPError,
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("POST 301 off-origin is a failed submit", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(301, { Location: "https://evil.example/steal" });
+      res.end();
+    });
+    try {
+      await expect(postJson(`${server.origin}/app`, { prompt: "x" })).rejects.toBeInstanceOf(
+        LivepeerHTTPError,
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("POST JSON with empty 2xx body is a failed submit", async () => {
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end();
+    });
+    try {
+      await expect(postJson(`${server.origin}/app`, { prompt: "x" })).rejects.toThrow(
+        /empty body from submit/,
+      );
+    } finally {
+      await server.close();
+    }
+  });
 });

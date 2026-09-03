@@ -43,6 +43,10 @@ export interface CallRunnerOptions {
   maxPaymentChallengeRetries?: number;
   /** Skip TLS verification. Default true; pass false to verify runner certs. */
   insecureTls?: boolean;
+  /** Job id sent to the signer so its ticket carries a joinable request id. */
+  gatewayRequestId?: string | null;
+  /** Which integration issued the call. The signer defaults to "direct_api". */
+  attributionSource?: string | null;
 }
 
 export function runnerPaymentType(
@@ -121,6 +125,8 @@ async function getRunnerPayment(options: {
   signerHeaders: HeadersMap | undefined;
   maxPrice: LiveRunnerPriceInfo | null;
   app: string | null;
+  gatewayRequestId: string | null;
+  attributionSource: string | null;
 }): Promise<{ session: LivePaymentSession; payment: GetPaymentResponse }> {
   const session = new LivePaymentSession({
     signerUrl: options.signerUrl,
@@ -129,6 +135,8 @@ async function getRunnerPayment(options: {
     challenge: options.challenge,
     app: options.app,
     maxPrice: options.maxPrice,
+    gatewayRequestId: options.gatewayRequestId,
+    attributionSource: options.attributionSource,
   });
   const payment = await session.getPayment();
   if (!payment.payment) {
@@ -148,6 +156,8 @@ async function resolveChallengePayment(options: {
   maxPrice: LiveRunnerPriceInfo | null;
   app: string | null;
   requestHeaders: HeadersMap;
+  gatewayRequestId: string | null;
+  attributionSource: string | null;
 }): Promise<{ session: LivePaymentSession; sessionId: string; needsOngoingFunding: boolean }> {
   const paid = await getRunnerPayment({
     challenge: options.challenge,
@@ -156,6 +166,8 @@ async function resolveChallengePayment(options: {
     signerHeaders: options.signerHeaders,
     maxPrice: options.maxPrice,
     app: options.app,
+    gatewayRequestId: options.gatewayRequestId,
+    attributionSource: options.attributionSource,
   });
   options.requestHeaders["Livepeer-Payment"] = paid.payment.payment;
   options.requestHeaders["Livepeer-Segment"] = paid.payment.segCreds ?? "";
@@ -188,6 +200,8 @@ interface PaidAttemptInput {
   timeoutMs: number;
   insecureTls: boolean;
   method: string;
+  gatewayRequestId: string | null;
+  attributionSource: string | null;
 }
 
 type PaidAttemptResult =
@@ -213,6 +227,8 @@ async function attemptPaidCall(input: PaidAttemptInput): Promise<PaidAttemptResu
         maxPrice: input.maxPrice,
         app: input.runner?.app ?? null,
         requestHeaders,
+        gatewayRequestId: input.gatewayRequestId,
+        attributionSource: input.attributionSource,
       });
       paymentSession = paid.session;
       sessionId = paid.sessionId;
@@ -287,6 +303,8 @@ export async function callRunner(options: CallRunnerOptions): Promise<LiveRunner
       timeoutMs: options.timeoutMs ?? 5_000,
       insecureTls: options.insecureTls !== false,
       method: options.method ?? "POST",
+      gatewayRequestId: options.gatewayRequestId ?? null,
+      attributionSource: options.attributionSource ?? null,
     });
     if (outcome.kind === "success") return outcome.result;
     challenge = outcome.challenge;

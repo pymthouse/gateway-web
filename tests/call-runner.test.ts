@@ -4,11 +4,12 @@ import { LivepeerGatewayError, LivepeerHTTPError } from "../src/errors.js";
 import { clearSignerInfoCache } from "../src/signer.js";
 import type { LiveRunnerInstance } from "../src/types.js";
 import { json, startMockServer } from "./mock-server.js";
+import { replySignOrchestratorInfo } from "./signer-test-helpers.js";
 
 function runner(overrides: Partial<LiveRunnerInstance> = {}): LiveRunnerInstance {
   return {
     url: "http://unused",
-    app: "storyboard/fal-flux-schnell",
+    app: "livepeer-example/fal-flux-schnell",
     runnerId: "r1",
     mode: "single-shot",
     orchestratorUrl: "http://orch",
@@ -42,10 +43,7 @@ describe("callRunner", () => {
   it("402 → pay → retry → 200", async () => {
     let generateHits = 0;
     const server = await startMockServer((req, res) => {
-      if (req.pathname === "/sign-orchestrator-info") {
-        json(res, 200, { address: "0xabc", signature: "0xsig" });
-        return;
-      }
+      if (replySignOrchestratorInfo(req, res)) return;
       if (req.pathname === "/generate-live-payment") {
         const body = req.json() as Record<string, unknown>;
         expect(body.orchestrator).toBe("opaque-params");
@@ -58,7 +56,7 @@ describe("callRunner", () => {
         });
         return;
       }
-      if (req.pathname === "/app/generate") {
+      if (req.pathname === "/app") {
         generateHits += 1;
         if (generateHits === 1) {
           expect(req.headers["livepeer-payer-address"]).toBe("0xabc");
@@ -80,8 +78,8 @@ describe("callRunner", () => {
     try {
       clearSignerInfoCache();
       const result = await callRunner({
-        runnerUrl: `${server.origin}/app/generate`,
-        runner: runner({ url: `${server.origin}/app/generate` }),
+        runnerUrl: `${server.origin}/app`,
+        runner: runner({ url: `${server.origin}/app` }),
         payload: { prompt: "a dragon" },
         signerUrl: server.origin,
         timeoutMs: 5_000,
@@ -97,10 +95,7 @@ describe("callRunner", () => {
 
   it("exhausts payment challenge retries", async () => {
     const server = await startMockServer((req, res) => {
-      if (req.pathname === "/sign-orchestrator-info") {
-        json(res, 200, { address: "0xabc", signature: "0xsig" });
-        return;
-      }
+      if (replySignOrchestratorInfo(req, res)) return;
       if (req.pathname === "/generate-live-payment") {
         json(res, 200, { payment: "PAY", segCreds: "SEG", state: {} });
         return;
@@ -115,7 +110,7 @@ describe("callRunner", () => {
       clearSignerInfoCache();
       await expect(
         callRunner({
-          runnerUrl: `${server.origin}/app/generate`,
+          runnerUrl: `${server.origin}/app`,
           runner: runner(),
           signerUrl: server.origin,
           maxPaymentChallengeRetries: 0,
@@ -130,17 +125,14 @@ describe("callRunner", () => {
 
   it("non-402 errors propagate", async () => {
     const server = await startMockServer((req, res) => {
-      if (req.pathname === "/sign-orchestrator-info") {
-        json(res, 200, { address: "0xabc", signature: "0xsig" });
-        return;
-      }
+      if (replySignOrchestratorInfo(req, res)) return;
       json(res, 500, { error: { message: "boom" } });
     });
     try {
       clearSignerInfoCache();
       await expect(
         callRunner({
-          runnerUrl: `${server.origin}/app/generate`,
+          runnerUrl: `${server.origin}/app`,
           runner: runner(),
           signerUrl: server.origin,
         }),
@@ -162,7 +154,7 @@ describe("callRunner", () => {
     try {
       await expect(
         callRunner({
-          runnerUrl: `${server.origin}/app/generate`,
+          runnerUrl: `${server.origin}/app`,
         }),
       ).rejects.toBeInstanceOf(LivepeerGatewayError);
     } finally {

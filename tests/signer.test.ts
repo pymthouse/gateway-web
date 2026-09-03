@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { PaymentError, SignerRefreshRequired } from "../src/errors.js";
 import { clearSignerInfoCache, getSignerInfo, LivePaymentSession } from "../src/signer.js";
 import { json, startMockServer } from "./mock-server.js";
+import {
+  fixedChallenge,
+  replySignOrchestratorInfo,
+  shortChallenge,
+  withCapturedMints,
+  withLivePaymentSession,
+} from "./signer-test-helpers.js";
 
 describe("signer", () => {
   it("getSignerInfo posts /sign-orchestrator-info and caches", async () => {
@@ -28,10 +35,7 @@ describe("signer", () => {
     let payHits = 0;
     let refreshHits = 0;
     const server = await startMockServer((req, res) => {
-      if (req.pathname === "/sign-orchestrator-info") {
-        json(res, 200, { address: "0xabc", signature: "0xsig" });
-        return;
-      }
+      if (replySignOrchestratorInfo(req, res)) return;
       if (req.pathname === "/generate-live-payment") {
         payHits += 1;
         const body = req.json() as Record<string, unknown>;
@@ -73,11 +77,7 @@ describe("signer", () => {
       const session = new LivePaymentSession({
         signerUrl: server.origin,
         type: "fixed",
-        challenge: {
-          paymentParams: "params-1",
-          manifestId: "man-1",
-          paymentUrl: `${server.origin}/pay`,
-        },
+        challenge: fixedChallenge(server.origin),
       });
       const first = await session.getPayment();
       expect(first).toEqual({ payment: "pay-1", segCreds: "seg-1" });
@@ -89,6 +89,34 @@ describe("signer", () => {
       clearSignerInfoCache();
       await server.close();
     }
+  });
+
+  it("sends gatewayRequestId and attributionSource so tickets stay joinable", async () => {
+    await withCapturedMints(
+      { gatewayRequestId: "job_abc123", attributionSource: "mcp" },
+      async (session, bodies, origin) => {
+        await session.getPayment();
+        expect(bodies[0]?.gatewayRequestId).toBe("job_abc123");
+        expect(bodies[0]?.attributionSource).toBe("mcp");
+
+        // The pair must survive a handoff, or a resumed loop bills unattributed.
+        const resumed = LivePaymentSession.fromSnapshot({
+          signerUrl: origin,
+          snapshot: session.snapshot(),
+        });
+        await resumed.getPayment();
+        expect(bodies[1]?.gatewayRequestId).toBe("job_abc123");
+        expect(bodies[1]?.attributionSource).toBe("mcp");
+      },
+    );
+  });
+
+  it("omits attribution fields when the caller supplies none", async () => {
+    await withCapturedMints({}, async (session, bodies) => {
+      await session.getPayment();
+      expect(bodies[0]).not.toHaveProperty("gatewayRequestId");
+      expect(bodies[0]).not.toHaveProperty("attributionSource");
+    });
   });
 
   it("snapshot round-trips state so fromSnapshot continues the payment sequence", async () => {
@@ -116,11 +144,7 @@ describe("signer", () => {
         type: "live",
         app: "livepeer-example/realtime-transcription",
         maxPrice: { price: 0.01, currency: "usd", unit: "hour" },
-        challenge: {
-          paymentParams: "params-1",
-          manifestId: "man-1",
-          paymentUrl: `${server.origin}/pay`,
-        },
+        challenge: fixedChallenge(server.origin),
       });
       await first.getPayment();
       const snap = first.snapshot();
@@ -139,50 +163,34 @@ describe("signer", () => {
   });
 
   it("480 with no prior state is not retried", async () => {
-    const server = await startMockServer((req, res) => {
-      if (req.pathname === "/generate-live-payment") {
-        json(res, 480, {});
-        return;
-      }
-      json(res, 404, {});
-    });
-    try {
-      const session = new LivePaymentSession({
-        signerUrl: server.origin,
-        type: "live",
-        challenge: {
-          paymentParams: "p",
-          manifestId: "m",
-          paymentUrl: `${server.origin}/pay`,
-        },
-      });
-      await expect(session.getPayment()).rejects.toBeInstanceOf(SignerRefreshRequired);
-    } finally {
-      await server.close();
-    }
+    await withLivePaymentSession(
+      (req, res) => {
+        if (req.pathname === "/generate-live-payment") {
+          json(res, 480, {});
+          return;
+        }
+        json(res, 404, {});
+      },
+      (origin) => ({ type: "live", challenge: shortChallenge(origin) }),
+      async (session) => {
+        await expect(session.getPayment()).rejects.toBeInstanceOf(SignerRefreshRequired);
+      },
+    );
   });
 
   it("missing payment field is PaymentError", async () => {
-    const server = await startMockServer((req, res) => {
-      if (req.pathname === "/generate-live-payment") {
-        json(res, 200, { state: {} });
-        return;
-      }
-      json(res, 404, {});
-    });
-    try {
-      const session = new LivePaymentSession({
-        signerUrl: server.origin,
-        type: "live",
-        challenge: {
-          paymentParams: "p",
-          manifestId: "m",
-          paymentUrl: `${server.origin}/pay`,
-        },
-      });
-      await expect(session.getPayment()).rejects.toBeInstanceOf(PaymentError);
-    } finally {
-      await server.close();
-    }
+    await withLivePaymentSession(
+      (req, res) => {
+        if (req.pathname === "/generate-live-payment") {
+          json(res, 200, { state: {} });
+          return;
+        }
+        json(res, 404, {});
+      },
+      (origin) => ({ type: "live", challenge: shortChallenge(origin) }),
+      async (session) => {
+        await expect(session.getPayment()).rejects.toBeInstanceOf(PaymentError);
+      },
+    );
   });
 });

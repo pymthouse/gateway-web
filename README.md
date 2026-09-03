@@ -4,9 +4,11 @@ Minimal Node.js client for Livepeer **live-runner** inference: single-shot HTTP 
 
 Ports the dispatch path that the Python SDK service uses: discover runners, pick by the **advertised** runner mode, pay a 402 challenge via a remote signer, and return the runner's JSON (with a media URL extracted). Persistent runners keep the discovery `/session` URL, reserve a session, POST `{app_url}{endpoint}`, then `POST {control_url}/stop`.
 
-`runInference` considers both modes and dispatches per runner. Persistent apps **must** pass `endpoint` — it is not advertised and cannot be guessed from the app id. Missing `endpoint` fails **before** reserve so you are not billed for a session that then 404s.
+`runInference` considers both modes and dispatches per runner. Single-shot capabilities POST the discovery URL as published — `endpoint` is rejected. Persistent apps **must** pass `endpoint` — it is not advertised and cannot be guessed from the app id. Missing `endpoint` fails **before** reserve so you are not billed for a session that then 404s.
 
 `runInference` against a persistent runner is `reserve → one call → stop`. Each invocation pays a full reserve; the isolate cannot reuse the session across calls. Hold a session yourself with `reserveSession` / `callSession` / `stopSession` when you need more than one HTTP round-trip.
+
+If the runner returns a fal **queue receipt** (`IN_QUEUE` / `status_url`, no media URL) instead of blocking until completion, `runInference` polls `status_url` then fetches `response_url` for the remaining timeout. Queue control URLs are never treated as media. A 401/403 on the poll URL leaves the handle on `result.data` / `statusUrl` so the caller can surface it. Pass `onProgress` for poll ticks.
 
 **Orchestrator failover:** for each capability the gateway caches up to **5 distinct orchestrators** (one runner per orch, merit-ranked). On retryable runner failures (5xx, timeouts, exhausted payment retries on that orch) it automatically tries the next cached orchestrator before giving up. Single-shot runners are tried first when an app is advertised under both modes.
 
@@ -33,6 +35,7 @@ const gw = createGateway({
   // discoveryUrl defaults to `${signerUrl}/discover-orchestrators`
   insecureTls: true, // runner + discovery only; signer stays verified
   timeoutMs: 600_000,
+  attributionSource: "pymthouse_gateway", // gateway stack recorded on every ticket
 });
 
 const res = await gw.runInference({
@@ -40,7 +43,7 @@ const res = await gw.runInference({
   params: { prompt: "a dragon" },
 });
 
-console.log(res.url, res.mode);
+console.log(res.url, res.mode, res.gatewayRequestId);
 
 // Persistent HTTP apps: pass the app path. WebSocket / trickle apps are out of scope.
 const hello = await gw.runInference({
@@ -68,6 +71,23 @@ Uses Console's `PYMTHOUSE_*` M2M vars to mint a signer JWT, then runs
 `createGateway().runInference()` against pymthouse discovery. Default capability
 is `vllm/qwen3-coder-30b` (chat completion). Override with `CAPABILITY`,
 `MODEL`, and `PROMPT`.
+
+## Usage attribution
+
+Every paid call sends `gatewayRequestId` and `attributionSource` in the
+`/generate-live-payment` body, which PymtHouse records on the resulting ticket
+rows as `gateway_request_id` / `attribution_source`. That is what lets a caller
+join a job it made to what that job actually cost.
+
+`runInference` generates a `gatewayRequestId` when you do not supply one and
+always returns it on the result. Pass your own when you need the id **before**
+the call — e.g. to record a prompt against it, or to attribute a call that pays
+tickets and then fails.
+
+`attributionSource` belongs on `createGateway` because it names the gateway
+stack, not the job. PymtHouse documents the vocabulary as `pymthouse_gateway |
+python_gateway | direct_api` and defaults to `direct_api`; this package is
+`pymthouse_gateway`.
 
 ## TLS
 
