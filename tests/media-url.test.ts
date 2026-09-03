@@ -17,6 +17,17 @@ describe("extractMediaUrl", () => {
     expect(extractMediaUrl({ data: { data: { url: "https://a/i.png" } } })).toBe("https://a/i.png");
   });
 
+  it("reads runner receipt output.images[0].url", () => {
+    expect(
+      extractMediaUrl({
+        request_id: "req-123",
+        endpoint_id: "xai/grok-imagine-image/v2.0/text-to-image",
+        schema_sha256: "a".repeat(64),
+        output: { images: [{ url: "https://cdn.example/grok.png" }] },
+      }),
+    ).toBe("https://cdn.example/grok.png");
+  });
+
   it("reads meshy model_urls", () => {
     expect(extractMediaUrl({ model_urls: { glb: "https://a/m.glb" } })).toBe("https://a/m.glb");
   });

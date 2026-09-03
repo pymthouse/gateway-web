@@ -8,7 +8,7 @@ const RUNNERS = [
     address: "https://orch.example:8936",
     runners: [
       {
-        app: "storyboard/fal-flux-schnell",
+        app: "livepeer-example/fal-flux-schnell",
         url: "https://orch.example:8936/apps/flux/session",
         mode: "single-shot",
         price_info: { price: 1, currency: "usd", unit: "fixed" },
@@ -35,17 +35,17 @@ describe("discovery", () => {
   it("filters to runners with url+app and optional app/gpu filters", async () => {
     const server = await startMockServer((req, res) => {
       expect(req.pathname).toBe("/discover-orchestrators");
-      expect(req.url.searchParams.getAll("app")).toEqual(["storyboard/fal-flux-schnell"]);
+      expect(req.url.searchParams.getAll("app")).toEqual(["livepeer-example/fal-flux-schnell"]);
       json(res, 200, RUNNERS);
     });
     try {
       const entries = await discoverRunners({
         signerUrl: server.origin,
-        app: "storyboard/fal-flux-schnell",
+        app: "livepeer-example/fal-flux-schnell",
       });
       expect(entries).toHaveLength(1);
       expect(entries[0]?.runners).toHaveLength(1);
-      expect(entries[0]?.runners[0]?.app).toBe("storyboard/fal-flux-schnell");
+      expect(entries[0]?.runners[0]?.app).toBe("livepeer-example/fal-flux-schnell");
     } finally {
       await server.close();
     }

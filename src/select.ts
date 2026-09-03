@@ -73,32 +73,6 @@ function modeAllowed(mode: string, modes: readonly RunnerMode[]): boolean {
   return modes.includes(advertisedMode(mode));
 }
 
-function lastAppSegment(app: string): string {
-  const trimmed = stripTrailingSlashes(app);
-  const slash = trimmed.lastIndexOf("/");
-  return slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
-}
-
-function compactToken(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function appMatchesCapability(app: string, capability: string): boolean {
-  if (app === capability) return true;
-  const seg = lastAppSegment(app);
-  if (seg === capability) return true;
-  // storyboard/fal-flux-schnell ↔ flux-schnell
-  if (seg.endsWith(`-${capability}`) || seg.endsWith(capability)) return true;
-  const n = app.toLowerCase();
-  const s = capability.toLowerCase();
-  const cn = compactToken(seg);
-  const cs = compactToken(s);
-  if (cs.length >= 4 && (cn === cs || cn.includes(cs) || cs.includes(cn))) return true;
-  if (s === "flux-dev" && /flux\.?1[-.]?dev/.test(n)) return true;
-  if (s === "flux-schnell" && n.includes("schnell")) return true;
-  return false;
-}
-
 /** Resolve a capability name to a discovery `app` id. Explicit override wins. */
 export function resolveApp(
   instances: LiveRunnerInstance[],
@@ -109,29 +83,16 @@ export function resolveApp(
   const cap = capability.trim();
   if (!cap) return null;
   for (const inst of instances) {
-    if (appMatchesCapability(inst.app, cap)) return inst.app;
+    if (inst.app === cap) return inst.app;
   }
   return null;
 }
 
-export function endpointFor(app: string, endpoint?: string): string {
-  if (endpoint?.trim()) {
-    const ep = endpoint.trim();
-    return ep.startsWith("/") ? ep : `/${ep}`;
-  }
-  const seg = lastAppSegment(app);
-  // Production fal live-runner apps advertise storyboard/fal-<cap> and
-  // serve POST /generate (see lr_offerings.default_offerings). Community
-  // image-generation apps on pymthouse serve the OpenAI Images API.
-  if (app.startsWith("image-generation/") || app.includes("/image-generation/")) {
-    return "/v1/images/generations";
-  }
-  if (app.startsWith("vllm/") || seg.startsWith("vllm")) {
-    return "/v1/chat/completions";
-  }
-  if (seg.startsWith("fal-")) return "/generate";
-  if (seg) return `/${seg}`;
-  return "/generate";
+/** Caller-supplied subpath only. Single-shot Live Runner execute is POST on the discovery URL. */
+export function endpointFor(_app: string, endpoint?: string): string {
+  if (!endpoint?.trim()) return "";
+  const ep = endpoint.trim();
+  return ep.startsWith("/") ? ep : `/${ep}`;
 }
 
 /** Suffix `/app` when the catalog published a bare runner base. Never rewrite `/session`. */

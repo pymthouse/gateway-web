@@ -1,7 +1,5 @@
 /**
- * Pull a media URL out of a runner / fal-style response envelope.
- *
- * Port of storyboard `packages/creative-kit/src/utils/url-extract.ts`.
+ * Pull a media URL out of a runner receipt or provider JSON envelope.
  */
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -97,7 +95,7 @@ export function extractMediaUrl(resp: unknown): string | null {
   }
 
   const inner = asRecord(data.data);
-  return (
+  const direct =
     mediaFieldUrls(r) ??
     stringProp(r, "url") ??
     mediaFieldUrls(data) ??
@@ -107,8 +105,12 @@ export function extractMediaUrl(resp: unknown): string | null {
     modelBundleUrl(data) ??
     stringProp(data, "url") ??
     (inner ? (stringProp(inner, "url") ?? mediaFieldUrls(inner)) : undefined) ??
-    firstHttpString(data)
-  );
+    firstHttpString(data);
+  if (direct) return direct;
+
+  const output = asRecord(r.output);
+  if (output && output !== r) return extractMediaUrl(output);
+  return null;
 }
 
 export function mediaKind(url: string): "image" | "video" | "audio" {

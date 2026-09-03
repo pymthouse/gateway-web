@@ -8,7 +8,7 @@ import { json, startMockServer } from "./mock-server.js";
 function runner(overrides: Partial<LiveRunnerInstance> = {}): LiveRunnerInstance {
   return {
     url: "http://unused",
-    app: "storyboard/fal-flux-schnell",
+    app: "livepeer-example/fal-flux-schnell",
     runnerId: "r1",
     mode: "single-shot",
     orchestratorUrl: "http://orch",
@@ -58,7 +58,7 @@ describe("callRunner", () => {
         });
         return;
       }
-      if (req.pathname === "/app/generate") {
+      if (req.pathname === "/app") {
         generateHits += 1;
         if (generateHits === 1) {
           expect(req.headers["livepeer-payer-address"]).toBe("0xabc");
@@ -80,8 +80,8 @@ describe("callRunner", () => {
     try {
       clearSignerInfoCache();
       const result = await callRunner({
-        runnerUrl: `${server.origin}/app/generate`,
-        runner: runner({ url: `${server.origin}/app/generate` }),
+        runnerUrl: `${server.origin}/app`,
+        runner: runner({ url: `${server.origin}/app` }),
         payload: { prompt: "a dragon" },
         signerUrl: server.origin,
         timeoutMs: 5_000,
@@ -115,7 +115,7 @@ describe("callRunner", () => {
       clearSignerInfoCache();
       await expect(
         callRunner({
-          runnerUrl: `${server.origin}/app/generate`,
+          runnerUrl: `${server.origin}/app`,
           runner: runner(),
           signerUrl: server.origin,
           maxPaymentChallengeRetries: 0,
@@ -140,7 +140,7 @@ describe("callRunner", () => {
       clearSignerInfoCache();
       await expect(
         callRunner({
-          runnerUrl: `${server.origin}/app/generate`,
+          runnerUrl: `${server.origin}/app`,
           runner: runner(),
           signerUrl: server.origin,
         }),
@@ -162,7 +162,7 @@ describe("callRunner", () => {
     try {
       await expect(
         callRunner({
-          runnerUrl: `${server.origin}/app/generate`,
+          runnerUrl: `${server.origin}/app`,
         }),
       ).rejects.toBeInstanceOf(LivepeerGatewayError);
     } finally {

@@ -242,7 +242,8 @@ export function createGateway(config: GatewayConfig): Gateway {
     gatewayRequestId: string,
   ) {
     const endpoint = endpointFor(runner.app, req.endpoint);
-    const runnerUrl = joinEndpoint(normalizeAppBase(runner.url), endpoint);
+    const base = normalizeAppBase(runner.url);
+    const runnerUrl = endpoint ? joinEndpoint(base, endpoint) : base;
     const result = await callRunner({
       runnerUrl,
       runner,

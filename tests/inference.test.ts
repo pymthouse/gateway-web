@@ -5,7 +5,7 @@ import { clearSignerInfoCache } from "../src/signer.js";
 import { json, startMockServer } from "./mock-server.js";
 
 describe("runInference", () => {
-  it("discovers, hits /app + /generate, pays 402, extracts media URL", async () => {
+  it("discovers, POSTs discovery /app, pays 402, extracts media URL", async () => {
     let generateHits = 0;
     const server = await startMockServer((req, res) => {
       if (req.pathname === "/discover-orchestrators") {
@@ -14,7 +14,7 @@ describe("runInference", () => {
             address: `${req.url.origin}`,
             runners: [
               {
-                app: "storyboard/fal-flux-schnell",
+                app: "livepeer-example/fal-flux-schnell",
                 url: `${req.url.origin}/apps/flux/app`,
                 mode: "single-shot",
                 runner_id: "r1",
@@ -33,7 +33,7 @@ describe("runInference", () => {
         json(res, 200, { payment: "PAY", segCreds: "SEG", state: {} });
         return;
       }
-      if (req.pathname === "/apps/flux/app/generate") {
+      if (req.pathname === "/apps/flux/app") {
         generateHits += 1;
         if (generateHits === 1) {
           json(res, 402, {
@@ -57,15 +57,15 @@ describe("runInference", () => {
         timeoutMs: 5_000,
       });
       const res = await gw.runInference({
-        capability: "flux-schnell",
+        capability: "livepeer-example/fal-flux-schnell",
         params: { prompt: "a dragon" },
       });
       expect(res.url).toBe("https://cdn.example/out.jpg");
       expect(res.imageUrl).toBe("https://cdn.example/out.jpg");
       expect(res.videoUrl).toBeNull();
-      expect(res.app).toBe("storyboard/fal-flux-schnell");
+      expect(res.app).toBe("livepeer-example/fal-flux-schnell");
       expect(res.mode).toBe("single-shot");
-      expect(res.runnerUrl).toContain("/apps/flux/app/generate");
+      expect(res.runnerUrl).toContain("/apps/flux/app");
       expect(generateHits).toBe(2);
     } finally {
       clearSignerInfoCache();
@@ -97,7 +97,7 @@ describe("runInference", () => {
             address: `${req.url.origin}/orch-a`,
             runners: [
               {
-                app: "storyboard/fal-flux-schnell",
+                app: "livepeer-example/fal-flux-schnell",
                 url: `${req.url.origin}/apps/flux-a/app`,
                 mode: "single-shot",
                 runner_id: "bad",
@@ -109,7 +109,7 @@ describe("runInference", () => {
             address: `${req.url.origin}/orch-b`,
             runners: [
               {
-                app: "storyboard/fal-flux-schnell",
+                app: "livepeer-example/fal-flux-schnell",
                 url: `${req.url.origin}/apps/flux-b/app`,
                 mode: "single-shot",
                 runner_id: "good",
@@ -128,11 +128,11 @@ describe("runInference", () => {
         json(res, 200, { payment: "PAY", segCreds: "SEG", state: {} });
         return;
       }
-      if (req.pathname === "/apps/flux-a/app/generate") {
+      if (req.pathname === "/apps/flux-a/app") {
         json(res, 500, { error: "CUDA error" });
         return;
       }
-      if (req.pathname === "/apps/flux-b/app/generate") {
+      if (req.pathname === "/apps/flux-b/app") {
         goodGenerateHits += 1;
         if (goodGenerateHits === 1) {
           json(res, 402, {
@@ -154,7 +154,7 @@ describe("runInference", () => {
         timeoutMs: 5_000,
       });
       const res = await gw.runInference({
-        capability: "flux-schnell",
+        capability: "livepeer-example/fal-flux-schnell",
         params: { prompt: "failover test" },
       });
       expect(res.url).toBe("https://cdn.example/failover.jpg");
@@ -201,11 +201,11 @@ describe("runInference", () => {
         json(res, 200, { payment: "PAY", segCreds: "SEG", state: {} });
         return;
       }
-      if (req.pathname === "/apps/flux-a/app/v1/images/generations") {
+      if (req.pathname === "/apps/flux-a/app") {
         json(res, 500, { error: "CUDA error" });
         return;
       }
-      if (req.pathname === "/apps/flux-b/app/v1/images/generations") {
+      if (req.pathname === "/apps/flux-b/app") {
         goodHits += 1;
         if (goodHits === 1) {
           json(res, 402, {
@@ -278,11 +278,11 @@ describe("runInference", () => {
         json(res, 200, { payment: "PAY", segCreds: "SEG", state: {} });
         return;
       }
-      if (req.pathname === "/apps/flux/app/v1/images/generations") {
+      if (req.pathname === "/apps/flux/app") {
         json(res, 500, { error: "CUDA error" });
         return;
       }
-      if (req.pathname === "/apps/sdxl/app/v1/images/generations") {
+      if (req.pathname === "/apps/sdxl/app") {
         sdxlHits += 1;
         if (sdxlHits === 1) {
           json(res, 402, {
@@ -310,6 +310,74 @@ describe("runInference", () => {
       expect(res.url).toBe("https://cdn.example/sibling.jpg");
       expect(res.app).toBe("image-generation/stability/sdxl");
       expect(sdxlHits).toBe(2);
+    } finally {
+      clearSignerInfoCache();
+      await server.close();
+    }
+  });
+
+  it("grok capability POSTs discovery /app and reads receipt output.images", async () => {
+    let appHits = 0;
+    const server = await startMockServer((req, res) => {
+      if (req.pathname === "/discover-orchestrators") {
+        json(res, 200, [
+          {
+            address: `${req.url.origin}`,
+            runners: [
+              {
+                app: "livepeer-example/fal-grok-image-2",
+                url: `${req.url.origin}/apps/fal-grok-image-2/app`,
+                mode: "single-shot",
+                runner_id: "grok",
+                price_info: { price: 1, currency: "usd", unit: "fixed" },
+              },
+            ],
+          },
+        ]);
+        return;
+      }
+      if (req.pathname === "/sign-orchestrator-info") {
+        json(res, 200, { address: "0xabc", signature: "0xsig" });
+        return;
+      }
+      if (req.pathname === "/generate-live-payment") {
+        json(res, 200, { payment: "PAY", segCreds: "SEG", state: {} });
+        return;
+      }
+      if (req.pathname === "/apps/fal-grok-image-2/app") {
+        appHits += 1;
+        if (appHits === 1) {
+          json(res, 402, {
+            payment_params: "p",
+            manifest_id: "m",
+            payment_url: `${req.url.origin}/pay`,
+          });
+          return;
+        }
+        json(res, 200, {
+          request_id: "req-grok",
+          endpoint_id: "xai/grok-imagine-image/v2.0/text-to-image",
+          schema_sha256: "a".repeat(64),
+          output: { images: [{ url: "https://cdn.example/grok.png" }] },
+        });
+        return;
+      }
+      json(res, 404, { error: { message: req.pathname } });
+    });
+    try {
+      clearSignerInfoCache();
+      const gw = createGateway({
+        signerUrl: server.origin,
+        timeoutMs: 5_000,
+      });
+      const res = await gw.runInference({
+        capability: "livepeer-example/fal-grok-image-2",
+        params: { prompt: "a dragon" },
+      });
+      expect(res.runnerUrl).toMatch(/\/apps\/fal-grok-image-2\/app$/);
+      expect(res.runnerUrl).not.toContain("/generate");
+      expect(res.imageUrl).toBe("https://cdn.example/grok.png");
+      expect(appHits).toBe(2);
     } finally {
       clearSignerInfoCache();
       await server.close();
