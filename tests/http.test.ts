@@ -71,35 +71,19 @@ describe("http", () => {
     }
   });
 
-  it("POST 301 same-origin Location is replayed with method, body, and headers", async () => {
-    const hits: string[] = [];
+  it("POST 301 same-origin Location is a failed submit", async () => {
     const server = await startMockServer((req, res) => {
-      hits.push(`${req.method} ${req.pathname}`);
-      if (req.pathname === "/apps/flux/app") {
-        res.writeHead(301, { Location: "/apps/flux/app/" });
+      if (req.pathname === "/app") {
+        res.writeHead(301, { Location: "/app/" });
         res.end();
         return;
       }
-      if (req.pathname === "/apps/flux/app/") {
-        expect(req.method).toBe("POST");
-        expect(req.headers["livepeer-payment"]).toBe("PAY");
-        expect(req.json()).toEqual({ prompt: "fox" });
-        json(res, 200, { output: { images: [{ url: "https://cdn.example/out.png" }] } });
-        return;
-      }
-      json(res, 404, { error: { message: req.pathname } });
+      json(res, 200, { ok: true });
     });
     try {
-      await expect(
-        postJson(
-          `${server.origin}/apps/flux/app`,
-          { prompt: "fox" },
-          {
-            headers: { "Livepeer-Payment": "PAY" },
-          },
-        ),
-      ).resolves.toEqual({ output: { images: [{ url: "https://cdn.example/out.png" }] } });
-      expect(hits).toEqual(["POST /apps/flux/app", "POST /apps/flux/app/"]);
+      await expect(postJson(`${server.origin}/app`, { prompt: "x" })).rejects.toBeInstanceOf(
+        LivepeerHTTPError,
+      );
     } finally {
       await server.close();
     }

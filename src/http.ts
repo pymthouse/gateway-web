@@ -158,36 +158,8 @@ async function readResponseBody(body: AsyncIterable<Buffer | string>): Promise<B
   return Buffer.concat(chunks);
 }
 
-const MAX_POST_REDIRECTS = 2;
-
 function isRedirectStatus(status: number): boolean {
   return status >= 300 && status < 400;
-}
-
-/** Same-origin Location only — payment headers must not follow off-host. */
-function sameOriginRedirectUrl(current: string, location: string): string | null {
-  let next: URL;
-  try {
-    next = new URL(location, current);
-  } catch {
-    return null;
-  }
-  if (next.protocol !== "http:" && next.protocol !== "https:") return null;
-  if (next.origin !== new URL(current).origin) return null;
-  return next.toString();
-}
-
-function postRedirectTarget(
-  method: string,
-  status: number,
-  requestUrl: string,
-  location: string | null,
-  redirectsLeft: number,
-): string | null {
-  if (!isRedirectStatus(status) || method !== "POST" || redirectsLeft <= 0 || !location) {
-    return null;
-  }
-  return sameOriginRedirectUrl(requestUrl, location);
 }
 
 function assertJsonSubmitHasBody(
@@ -236,46 +208,30 @@ export async function requestBody(
 }> {
   const timeoutMs = options.timeoutMs ?? 5_000;
   const { method, headers, body } = jsonRequestParts(options);
-  const parsed = parseHttpUrl(url);
-  let requestUrl = parsed.toString();
-  let redirectsLeft = method === "POST" ? MAX_POST_REDIRECTS : 0;
+  const requestUrl = parseHttpUrl(url).toString();
   try {
-    for (;;) {
-      const res = await request(requestUrl, {
-        method,
-        headers,
-        body,
-        dispatcher: dispatcherFor(options.insecureTls === true),
-        signal: AbortSignal.timeout(timeoutMs),
-        headersTimeout: timeoutMs,
-        bodyTimeout: timeoutMs,
-      });
-      const raw = await readResponseBody(res.body);
-      const contentType =
-        typeof res.headers["content-type"] === "string" ? res.headers["content-type"] : "";
-      const responseHeaders = res.headers as HttpHeaderBag;
-      const next = postRedirectTarget(
-        method,
-        res.statusCode,
-        requestUrl,
-        headerValue(responseHeaders, "location"),
-        redirectsLeft,
-      );
-      if (next) {
-        redirectsLeft -= 1;
-        requestUrl = next;
-        continue;
-      }
-      if (isRedirectStatus(res.statusCode) || res.statusCode >= 400) {
-        raiseHttpJsonError(res.statusCode, requestUrl, raw.toString("utf8"), responseHeaders);
-      }
-      assertJsonSubmitHasBody(method, body, raw, requestUrl, res.statusCode);
-      return {
-        body: raw,
-        contentType,
-        headers: responseHeaders,
-      };
+    const res = await request(requestUrl, {
+      method,
+      headers,
+      body,
+      dispatcher: dispatcherFor(options.insecureTls === true),
+      signal: AbortSignal.timeout(timeoutMs),
+      headersTimeout: timeoutMs,
+      bodyTimeout: timeoutMs,
+    });
+    const raw = await readResponseBody(res.body);
+    const contentType =
+      typeof res.headers["content-type"] === "string" ? res.headers["content-type"] : "";
+    const responseHeaders = res.headers as HttpHeaderBag;
+    if (isRedirectStatus(res.statusCode) || res.statusCode >= 400) {
+      raiseHttpJsonError(res.statusCode, requestUrl, raw.toString("utf8"), responseHeaders);
     }
+    assertJsonSubmitHasBody(method, body, raw, requestUrl, res.statusCode);
+    return {
+      body: raw,
+      contentType,
+      headers: responseHeaders,
+    };
   } catch (e) {
     rethrowHttpFailure(e, requestUrl);
   }
