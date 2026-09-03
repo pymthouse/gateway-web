@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { callRunner, padRunnerPrice, runnerPaymentType } from "../src/call-runner.js";
 import { LivepeerGatewayError, LivepeerHTTPError } from "../src/errors.js";
-import { SignerCredential } from "../src/signer-credential.js";
 import { clearSignerInfoCache } from "../src/signer.js";
 import type { LiveRunnerInstance } from "../src/types.js";
 import { json, startMockServer } from "./mock-server.js";
-import { replySignOrchestratorInfo } from "./signer-test-helpers.js";
+import { replySignOrchestratorInfo, rotatingBearerCredential } from "./signer-test-helpers.js";
 
 function runner(overrides: Partial<LiveRunnerInstance> = {}): LiveRunnerInstance {
   return {
@@ -148,16 +147,9 @@ describe("callRunner", () => {
     const authorizations: string[] = [];
     let appHits = 0;
     let payHits = 0;
-    let calls = 0;
-    const cred = SignerCredential.from(() => {
-      calls += 1;
-      return { Authorization: `Bearer t${calls}` };
-    });
+    const { credential } = rotatingBearerCredential();
     const server = await startMockServer((req, res) => {
-      if (req.pathname === "/sign-orchestrator-info") {
-        json(res, 200, { address: "0xabc", signature: "0xsig" });
-        return;
-      }
+      if (replySignOrchestratorInfo(req, res)) return;
       if (req.pathname === "/generate-live-payment") {
         authorizations.push(String(req.headers.authorization ?? ""));
         payHits += 1;
@@ -190,7 +182,7 @@ describe("callRunner", () => {
         runner: runner({ url: `${server.origin}/app` }),
         payload: { prompt: "a dragon" },
         signerUrl: server.origin,
-        signerHeaders: cred,
+        signerHeaders: credential,
         timeoutMs: 5_000,
       });
       expect(result.data.url).toBe("https://cdn.example/out.jpg");

@@ -1,4 +1,5 @@
 import type { ServerResponse } from "node:http";
+import { SignerCredential } from "../src/signer-credential.js";
 import {
   clearSignerInfoCache,
   LivePaymentSession,
@@ -8,6 +9,20 @@ import type { LivePaymentChallenge } from "../src/types.js";
 import { json, startMockServer, type MockHandler, type MockRequest } from "./mock-server.js";
 
 export const MOCK_SIGNER = { address: "0xabc", signature: "0xsig" } as const;
+
+export function rotatingBearerCredential(): {
+  credential: SignerCredential;
+  callCount: () => number;
+} {
+  let calls = 0;
+  return {
+    credential: SignerCredential.from(() => {
+      calls += 1;
+      return { Authorization: `Bearer t${calls}` };
+    }),
+    callCount: () => calls,
+  };
+}
 
 const DEFAULT_PAYMENT_STATE: Record<string, unknown> = { n: 1 };
 
@@ -89,12 +104,14 @@ export async function withLivePaymentSession(
 ): Promise<void> {
   const server = await startMockServer(handler);
   try {
+    clearSignerInfoCache();
     const session = new LivePaymentSession({
       signerUrl: server.origin,
       ...buildOptions(server.origin),
     });
     await run(session);
   } finally {
+    clearSignerInfoCache();
     await server.close();
   }
 }

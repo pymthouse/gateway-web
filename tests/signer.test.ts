@@ -6,6 +6,7 @@ import { json, startMockServer } from "./mock-server.js";
 import {
   fixedChallenge,
   replySignOrchestratorInfo,
+  rotatingBearerCredential,
   shortChallenge,
   withCapturedMints,
   withLivePaymentSession,
@@ -197,29 +198,24 @@ describe("signer", () => {
 
   it("getSignerInfo cache survives a rotating provider token", async () => {
     let infoHits = 0;
-    let calls = 0;
+    const { credential, callCount } = rotatingBearerCredential();
     const server = await startMockServer((req, res) => {
-      if (req.pathname === "/sign-orchestrator-info") {
+      if (replySignOrchestratorInfo(req, res)) {
         infoHits += 1;
-        json(res, 200, { address: "0xabc", signature: "0xsig" });
         return;
       }
       json(res, 404, {});
     });
     try {
       clearSignerInfoCache();
-      const cred = SignerCredential.from(() => {
-        calls += 1;
-        return { Authorization: `Bearer t${calls}` };
-      });
-      const a = await getSignerInfo(server.origin, cred);
-      cred.invalidate();
-      await cred.headers();
-      const b = await getSignerInfo(server.origin, cred);
+      const a = await getSignerInfo(server.origin, credential);
+      credential.invalidate();
+      await credential.headers();
+      const b = await getSignerInfo(server.origin, credential);
       expect(a).toEqual({ address: "0xabc", sig: "0xsig" });
       expect(b).toEqual(a);
       expect(infoHits).toBe(1);
-      expect(calls).toBe(2);
+      expect(callCount()).toBe(2);
     } finally {
       clearSignerInfoCache();
       await server.close();
@@ -228,56 +224,42 @@ describe("signer", () => {
 
   it("480 with state invalidates the credential and retries with a new bearer", async () => {
     const authorizations: string[] = [];
-    let calls = 0;
     let payHits = 0;
-    const cred = SignerCredential.from(() => {
-      calls += 1;
-      return { Authorization: `Bearer t${calls}` };
-    });
-    const server = await startMockServer((req, res) => {
-      if (req.pathname === "/sign-orchestrator-info") {
-        json(res, 200, { address: "0xabc", signature: "0xsig" });
-        return;
-      }
-      if (req.pathname === "/generate-live-payment") {
-        authorizations.push(String(req.headers.authorization ?? ""));
-        payHits += 1;
-        if (payHits === 1) {
-          json(res, 200, { payment: "pay-1", segCreds: "seg-1", state: { n: 1 } });
+    const { credential } = rotatingBearerCredential();
+    await withLivePaymentSession(
+      (req, res) => {
+        if (replySignOrchestratorInfo(req, res)) return;
+        if (req.pathname === "/generate-live-payment") {
+          authorizations.push(String(req.headers.authorization ?? ""));
+          payHits += 1;
+          if (payHits === 1) {
+            json(res, 200, { payment: "pay-1", segCreds: "seg-1", state: { n: 1 } });
+            return;
+          }
+          if (payHits === 2) {
+            json(res, 480, { error: { message: "refresh" } });
+            return;
+          }
+          json(res, 200, { payment: "pay-2", segCreds: "seg-2", state: { n: 2 } });
           return;
         }
-        if (payHits === 2) {
-          json(res, 480, { error: { message: "refresh" } });
+        if (req.pathname === "/pay/refresh-payment") {
+          json(res, 200, { payment_params: "params-2" });
           return;
         }
-        json(res, 200, { payment: "pay-2", segCreds: "seg-2", state: { n: 2 } });
-        return;
-      }
-      if (req.pathname === "/pay/refresh-payment") {
-        json(res, 200, { payment_params: "params-2" });
-        return;
-      }
-      json(res, 404, {});
-    });
-    try {
-      clearSignerInfoCache();
-      const session = new LivePaymentSession({
-        signerUrl: server.origin,
-        signerHeaders: cred,
+        json(res, 404, {});
+      },
+      (origin) => ({
         type: "fixed",
-        challenge: {
-          paymentParams: "params-1",
-          manifestId: "man-1",
-          paymentUrl: `${server.origin}/pay`,
-        },
-      });
-      expect(await session.getPayment()).toEqual({ payment: "pay-1", segCreds: "seg-1" });
-      expect(await session.getPayment()).toEqual({ payment: "pay-2", segCreds: "seg-2" });
-      expect(authorizations).toEqual(["Bearer t1", "Bearer t1", "Bearer t2"]);
-    } finally {
-      clearSignerInfoCache();
-      await server.close();
-    }
+        signerHeaders: credential,
+        challenge: fixedChallenge(origin),
+      }),
+      async (session) => {
+        expect(await session.getPayment()).toEqual({ payment: "pay-1", segCreds: "seg-1" });
+        expect(await session.getPayment()).toEqual({ payment: "pay-2", segCreds: "seg-2" });
+        expect(authorizations).toEqual(["Bearer t1", "Bearer t1", "Bearer t2"]);
+      },
+    );
   });
 
   it("funding cycle after expiry posts the rotated Authorization header", async () => {
