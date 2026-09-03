@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { callRunner } from "./call-runner.js";
 import { discoverRunners } from "./discovery.js";
-import { LivepeerGatewayError, NoRunnerAvailableError } from "./errors.js";
+import { attachGatewayRequestId, LivepeerGatewayError, NoRunnerAvailableError } from "./errors.js";
 import { capabilityMediaKind, extractMediaUrl } from "./media-url.js";
 import { awaitQueuedResult, extractQueueHandle, type QueueProgress } from "./queue.js";
 import {
@@ -342,125 +342,135 @@ export function createGateway(config: GatewayConfig): Gateway {
         req.timeoutMs ?? (typeof req.timeout === "number" ? req.timeout * 1000 : defaultTimeoutMs);
       const gatewayRequestId = req.gatewayRequestId?.trim() || randomUUID();
 
-      const entries = await loadEntries(timeoutMs);
-      const instances = instancesFromDiscovery(entries);
-      const app = resolveApp(instances, req.capability, req.app);
-      if (!app) {
-        throw new NoRunnerAvailableError(
-          `No live-runner app matching capability ${JSON.stringify(req.capability)}`,
-        );
-      }
-
-      const { cacheKey, runners } = cachedInferencePool(entries, app, req.capability);
-      rejectEndpointForSingleShotPool(runners, req.endpoint);
-      if (runners.every((r) => advertisedMode(r.mode) === "persistent")) {
-        requirePersistentEndpoint(app, req.endpoint);
-      }
-
-      const attemptRunners = selectModeRunners(runners, app, req.endpoint);
-
-      const payload = buildPayload(req);
-      const rejections: Array<{ url: string; reason: string }> = [];
-      let lastError: unknown;
-
-      for (const runner of attemptRunners) {
-        const mode = advertisedMode(runner.mode);
-        try {
-          const result =
-            mode === "persistent"
-              ? await runPersistent(runner, req, payload, timeoutMs, gatewayRequestId)
-              : await runSingleShot(runner, req, payload, timeoutMs, gatewayRequestId);
-          const remainingMs = Math.max(1, timeoutMs - (Date.now() - t0));
-          const data = await awaitQueuedResult(result.data, {
-            timeoutMs: remainingMs,
-            insecureTls,
-            runnerUrl: result.runnerUrl,
-            onProgress: req.onProgress,
-          });
-          return buildInferenceResult({
-            req,
-            runner,
-            runnerUrl: result.runnerUrl,
-            data,
-            t0,
-            gatewayRequestId,
-          });
-        } catch (e) {
-          lastError = e;
-          rejections.push({
-            url: runner.orchestratorUrl || runner.url,
-            reason: rejectionReason(e),
-          });
-          if (!isRetryableRunnerFailure(e)) throw e;
+      try {
+        const entries = await loadEntries(timeoutMs);
+        const instances = instancesFromDiscovery(entries);
+        const app = resolveApp(instances, req.capability, req.app);
+        if (!app) {
+          throw new NoRunnerAvailableError(
+            `No live-runner app matching capability ${JSON.stringify(req.capability)}`,
+          );
         }
-      }
 
-      orchCache.delete(cacheKey);
-      throw new NoRunnerAvailableError(
-        `all ${attemptRunners.length} orchestrator(s) failed for capability ${JSON.stringify(req.capability)}` +
-          (lastError instanceof Error ? `: ${lastError.message}` : ""),
-        rejections,
-      );
+        const { cacheKey, runners } = cachedInferencePool(entries, app, req.capability);
+        rejectEndpointForSingleShotPool(runners, req.endpoint);
+        if (runners.every((r) => advertisedMode(r.mode) === "persistent")) {
+          requirePersistentEndpoint(app, req.endpoint);
+        }
+
+        const attemptRunners = selectModeRunners(runners, app, req.endpoint);
+
+        const payload = buildPayload(req);
+        const rejections: Array<{ url: string; reason: string }> = [];
+        let lastError: unknown;
+
+        for (const runner of attemptRunners) {
+          const mode = advertisedMode(runner.mode);
+          try {
+            const result =
+              mode === "persistent"
+                ? await runPersistent(runner, req, payload, timeoutMs, gatewayRequestId)
+                : await runSingleShot(runner, req, payload, timeoutMs, gatewayRequestId);
+            const remainingMs = Math.max(1, timeoutMs - (Date.now() - t0));
+            const data = await awaitQueuedResult(result.data, {
+              timeoutMs: remainingMs,
+              insecureTls,
+              runnerUrl: result.runnerUrl,
+              onProgress: req.onProgress,
+            });
+            return buildInferenceResult({
+              req,
+              runner,
+              runnerUrl: result.runnerUrl,
+              data,
+              t0,
+              gatewayRequestId,
+            });
+          } catch (e) {
+            lastError = e;
+            rejections.push({
+              url: runner.orchestratorUrl || runner.url,
+              reason: rejectionReason(e),
+            });
+            if (!isRetryableRunnerFailure(e)) throw e;
+          }
+        }
+
+        orchCache.delete(cacheKey);
+        throw new NoRunnerAvailableError(
+          `all ${attemptRunners.length} orchestrator(s) failed for capability ${JSON.stringify(req.capability)}` +
+            (lastError instanceof Error ? `: ${lastError.message}` : ""),
+          rejections,
+        );
+      } catch (e) {
+        attachGatewayRequestId(e, gatewayRequestId);
+        throw e;
+      }
     },
 
     async reserveSession(req: ReserveSessionRequest): Promise<RunnerSession> {
       if (!req.capability?.trim()) {
         throw new LivepeerGatewayError("reserveSession requires capability");
       }
-      const entries = await loadEntries(defaultTimeoutMs);
-      const instances = instancesFromDiscovery(entries);
-      const app = resolveApp(instances, req.capability, req.app);
-      if (!app) {
-        throw new NoRunnerAvailableError(
-          `No live-runner app matching capability ${JSON.stringify(req.capability)}`,
-        );
-      }
-      const runners = pickRunners(
-        entries,
-        app,
-        {
-          admitted: config.admitted,
-          meritRank: config.meritRank,
-          capName: req.capability,
-          modes: ["persistent"],
-        },
-        maxOrchestrators,
-      );
-      if (runners.length === 0) {
-        throw new NoRunnerAvailableError(
-          `no LR runner for app ${app} in discovery (modes: persistent)`,
-        );
-      }
       const gatewayRequestId = req.gatewayRequestId?.trim() || randomUUID();
-      const rejections: Array<{ url: string; reason: string }> = [];
-      let lastError: unknown;
-      for (const runner of runners) {
-        try {
-          return await reserveRunnerSession({
-            runner,
-            payload: req.params ?? {},
-            signerUrl: config.signerUrl,
-            signerHeaders: config.signerHeaders,
-            timeoutMs: defaultTimeoutMs,
-            insecureTls,
-            startFunding: req.startFunding,
-            gatewayRequestId,
-            attributionSource: config.attributionSource ?? null,
-          });
-        } catch (e) {
-          lastError = e;
-          rejections.push({
-            url: runner.orchestratorUrl || runner.url,
-            reason: rejectionReason(e),
-          });
-          if (!isRetryableRunnerFailure(e)) throw e;
+      try {
+        const entries = await loadEntries(defaultTimeoutMs);
+        const instances = instancesFromDiscovery(entries);
+        const app = resolveApp(instances, req.capability, req.app);
+        if (!app) {
+          throw new NoRunnerAvailableError(
+            `No live-runner app matching capability ${JSON.stringify(req.capability)}`,
+          );
         }
+        const runners = pickRunners(
+          entries,
+          app,
+          {
+            admitted: config.admitted,
+            meritRank: config.meritRank,
+            capName: req.capability,
+            modes: ["persistent"],
+          },
+          maxOrchestrators,
+        );
+        if (runners.length === 0) {
+          throw new NoRunnerAvailableError(
+            `no LR runner for app ${app} in discovery (modes: persistent)`,
+          );
+        }
+        const rejections: Array<{ url: string; reason: string }> = [];
+        let lastError: unknown;
+        for (const runner of runners) {
+          try {
+            return await reserveRunnerSession({
+              runner,
+              payload: req.params ?? {},
+              signerUrl: config.signerUrl,
+              signerHeaders: config.signerHeaders,
+              timeoutMs: defaultTimeoutMs,
+              insecureTls,
+              startFunding: req.startFunding,
+              gatewayRequestId,
+              attributionSource: config.attributionSource ?? null,
+            });
+          } catch (e) {
+            lastError = e;
+            rejections.push({
+              url: runner.orchestratorUrl || runner.url,
+              reason: rejectionReason(e),
+            });
+            if (!isRetryableRunnerFailure(e)) throw e;
+          }
+        }
+        throw new NoRunnerAvailableError(
+          `all ${runners.length} orchestrator(s) failed to reserve ${JSON.stringify(req.capability)}` +
+            (lastError instanceof Error ? `: ${lastError.message}` : ""),
+          rejections,
+        );
+      } catch (e) {
+        attachGatewayRequestId(e, gatewayRequestId);
+        throw e;
       }
-      throw new NoRunnerAvailableError(
-        `all ${runners.length} orchestrator(s) failed to reserve ${JSON.stringify(req.capability)}` +
-          (lastError instanceof Error ? `: ${lastError.message}` : ""),
-        rejections,
-      );
     },
 
     callSession(handle: RunnerSession, req: CallSessionRequest): Promise<CallSessionResult> {

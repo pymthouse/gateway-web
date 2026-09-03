@@ -1,8 +1,18 @@
 export class LivepeerGatewayError extends Error {
+  /** Set after mint so a paid-then-failed call is still joinable. */
+  gatewayRequestId: string | null = null;
+
   constructor(message: string) {
     super(message);
     this.name = "LivepeerGatewayError";
   }
+}
+
+/** Stamp the job id on a thrown gateway error without wrapping it. */
+export function attachGatewayRequestId(error: unknown, gatewayRequestId: string): void {
+  if (!(error instanceof LivepeerGatewayError)) return;
+  if (error.gatewayRequestId) return;
+  error.gatewayRequestId = gatewayRequestId;
 }
 
 export class LivepeerHTTPError extends LivepeerGatewayError {

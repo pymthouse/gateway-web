@@ -23,9 +23,11 @@ export function replySignerPayment(
   req: MockRequest,
   res: ServerResponse,
   paymentState: Record<string, unknown> = DEFAULT_PAYMENT_STATE,
+  onPayment?: (body: Record<string, unknown>) => void,
 ): boolean {
   if (replySignOrchestratorInfo(req, res)) return true;
   if (req.pathname === "/generate-live-payment") {
+    onPayment?.(req.json() as Record<string, unknown>);
     json(res, 200, { payment: "PAY", segCreds: "SEG", state: paymentState });
     return true;
   }

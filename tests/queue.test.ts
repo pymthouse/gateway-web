@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { LivepeerGatewayError } from "../src/errors.js";
-import { awaitQueuedResult, extractQueueHandle } from "../src/queue.js";
+import { awaitQueuedResult, extractQueueHandle, isAllowedQueuePollUrl } from "../src/queue.js";
 import { json, startMockServer } from "./mock-server.js";
 
 describe("extractQueueHandle", () => {
@@ -70,7 +70,7 @@ describe("awaitQueuedResult", () => {
             response_url: `${server.origin}/fal-ai/flux/requests/req-123`,
           },
         },
-        { timeoutMs: 5_000, pollIntervalMs: 10 },
+        { timeoutMs: 5_000, pollIntervalMs: 10, runnerUrl: server.origin },
       );
       expect(statusHits).toBeGreaterThanOrEqual(2);
       expect(settled.output).toEqual({ images: [{ url: "https://cdn.example/out.png" }] });
@@ -90,7 +90,11 @@ describe("awaitQueuedResult", () => {
       response_url: `${server.origin}/result`,
     };
     try {
-      const settled = await awaitQueuedResult(receipt, { timeoutMs: 2_000, pollIntervalMs: 10 });
+      const settled = await awaitQueuedResult(receipt, {
+        timeoutMs: 2_000,
+        pollIntervalMs: 10,
+        runnerUrl: server.origin,
+      });
       expect(settled).toEqual(receipt);
     } finally {
       await server.close();
@@ -110,7 +114,7 @@ describe("awaitQueuedResult", () => {
             status_url: `${server.origin}/status`,
             response_url: `${server.origin}/result`,
           },
-          { timeoutMs: 2_000, pollIntervalMs: 10 },
+          { timeoutMs: 2_000, pollIntervalMs: 10, runnerUrl: server.origin },
         ),
       ).rejects.toBeInstanceOf(LivepeerGatewayError);
     } finally {
@@ -121,5 +125,49 @@ describe("awaitQueuedResult", () => {
   it("leaves a completed media body alone", async () => {
     const body = { images: [{ url: "https://cdn.example/out.png" }] };
     expect(await awaitQueuedResult(body, { timeoutMs: 100 })).toBe(body);
+  });
+
+  it("does not poll a status_url off the fal/runner allowlist", async () => {
+    const receipt = {
+      request_id: "req-123",
+      status: "IN_QUEUE",
+      status_url: "https://evil.example/status",
+      response_url: "https://evil.example/result",
+    };
+    const settled = await awaitQueuedResult(receipt, {
+      timeoutMs: 2_000,
+      runnerUrl: "https://runner.example/app/",
+    });
+    expect(settled).toBe(receipt);
+  });
+});
+
+describe("isAllowedQueuePollUrl", () => {
+  it("allows https fal queue hosts", () => {
+    expect(isAllowedQueuePollUrl("https://queue.fal.run/fal-ai/flux/requests/x/status")).toBe(true);
+    expect(
+      isAllowedQueuePollUrl("https://us.queue.fal.run/fal-ai/flux/requests/x/status"),
+    ).toBe(true);
+  });
+
+  it("allows the runner origin", () => {
+    expect(
+      isAllowedQueuePollUrl(
+        "http://127.0.0.1:9999/queue/req/status",
+        "http://127.0.0.1:9999/apps/flux/app/",
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects other hosts and http fal lookalikes", () => {
+    expect(isAllowedQueuePollUrl("https://evil.example/status")).toBe(false);
+    expect(isAllowedQueuePollUrl("http://169.254.169.254/latest/meta-data")).toBe(false);
+    expect(isAllowedQueuePollUrl("http://queue.fal.run/fal-ai/flux/requests/x/status")).toBe(false);
+    expect(
+      isAllowedQueuePollUrl(
+        "https://evil.example/status",
+        "https://runner.example/app/",
+      ),
+    ).toBe(false);
   });
 });

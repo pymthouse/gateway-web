@@ -52,6 +52,37 @@ function resolveMaybeUrl(value: string | null, baseUrl?: string): string | null 
   }
 }
 
+function isFalQueueHost(host: string): boolean {
+  const hostname = host.toLowerCase();
+  return hostname === "queue.fal.run" || hostname.endsWith(".queue.fal.run");
+}
+
+function sameOrigin(url: URL, base?: string): boolean {
+  if (!base) return false;
+  try {
+    return url.origin === parseHttpUrl(base).origin;
+  } catch {
+    return false;
+  }
+}
+
+/** https fal queue hosts, or the same origin as the runner that issued the receipt. */
+export function isAllowedQueuePollUrl(url: string, runnerUrl?: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = parseHttpUrl(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === "https:" && isFalQueueHost(parsed.hostname)) return true;
+  return sameOrigin(parsed, runnerUrl);
+}
+
+function allowedPollUrl(url: string | null, runnerUrl?: string): string | null {
+  if (!url) return null;
+  return isAllowedQueuePollUrl(url, runnerUrl) ? url : null;
+}
+
 function handleFromRecord(rec: Record<string, unknown>, baseUrl?: string): QueueHandle {
   return {
     requestId: stringProp(rec, "request_id"),
@@ -227,7 +258,7 @@ async function fetchSettledOutput(
   handle: QueueHandle,
   options: { deadline: number; insecureTls: boolean; runnerUrl?: string },
 ): Promise<Record<string, unknown>> {
-  const resultUrl = deriveResponseUrl(handle);
+  const resultUrl = allowedPollUrl(deriveResponseUrl(handle), options.runnerUrl);
   if (!resultUrl || remainingMs(options.deadline) <= 0) return data;
   const result = await fetchJsonObject(resultUrl, {
     timeoutMs: Math.min(DEFAULT_QUEUE_POLL_REQUEST_TIMEOUT_MS, remainingMs(options.deadline) || 1),
@@ -263,8 +294,13 @@ export async function awaitQueuedResult(
   const deadline = started + Math.max(0, options.timeoutMs);
   const insecureTls = options.insecureTls === true;
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_QUEUE_POLL_INTERVAL_MS;
-  const handle = extractQueueHandle(data, options.runnerUrl);
-  if (!handle || !handleLooksQueued(handle)) return data;
+  const extracted = extractQueueHandle(data, options.runnerUrl);
+  if (!extracted || !handleLooksQueued(extracted)) return data;
+  const handle = {
+    ...extracted,
+    statusUrl: allowedPollUrl(extracted.statusUrl, options.runnerUrl),
+    responseUrl: allowedPollUrl(extracted.responseUrl, options.runnerUrl),
+  };
   if (!handle.statusUrl && !handle.responseUrl) return data;
 
   const report = async (status: string) => {
