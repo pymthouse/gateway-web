@@ -45,12 +45,27 @@ export type HttpHeaderBag = Record<string, string | string[] | undefined>;
 
 export interface SignerCredentialMaterial {
   headers: HeadersMap;
-  /** Seconds until expiry. Enables refresh before use; omit to refresh only on 480. */
+  /**
+   * Seconds until expiry. Enables refresh before use; omit to refresh only on
+   * signer 401/403 or HTTP 480. A numeric `expiresInSeconds` on a bare header
+   * bag is treated as TTL, not as an HTTP header.
+   */
   expiresInSeconds?: number;
 }
 
+/** Header bag, optionally with a numeric TTL that is not sent as a header. */
+export interface SignerCredentialBag {
+  expiresInSeconds?: number;
+  [header: string]: string | number | undefined;
+}
+
+export type SignerCredentialProviderResult =
+  | SignerCredentialMaterial
+  | HeadersMap
+  | SignerCredentialBag;
+
 export type SignerCredentialProvider = () =>
-  Promise<SignerCredentialMaterial | HeadersMap> | SignerCredentialMaterial | HeadersMap;
+  Promise<SignerCredentialProviderResult> | SignerCredentialProviderResult;
 
 /** Static signer headers, or a fal-style token provider that can rotate them. */
 export type SignerCredentialInput = HeadersMap | SignerCredentialProvider;

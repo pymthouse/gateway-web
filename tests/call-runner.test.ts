@@ -186,9 +186,7 @@ describe("callRunner", () => {
         timeoutMs: 5_000,
       });
       expect(result.data.url).toBe("https://cdn.example/out.jpg");
-      expect(authorizations[0]).toBe("Bearer t1");
-      expect(authorizations.at(-1)).toBe("Bearer t2");
-      expect(authorizations.length).toBeGreaterThanOrEqual(2);
+      expect(authorizations).toEqual(["Bearer t1", "Bearer t2"]);
     } finally {
       clearSignerInfoCache();
       await server.close();

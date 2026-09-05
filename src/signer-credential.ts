@@ -1,8 +1,10 @@
+import { isUnauthorizedHttpError } from "./errors.js";
 import type {
   HeadersMap,
   SignerCredentialInput,
   SignerCredentialMaterial,
   SignerCredentialProvider,
+  SignerCredentialProviderResult,
 } from "./types.js";
 
 export const DEFAULT_SIGNER_REFRESH_SKEW_MS = 30_000;
@@ -12,6 +14,8 @@ export interface SignerCredentialOptions {
 }
 
 let nextProviderId = 1;
+
+const providerCredentials = new WeakMap<SignerCredentialProvider, SignerCredential>();
 
 export function freezeHeaders(headers: HeadersMap | undefined): string {
   if (!headers) return "";
@@ -25,26 +29,36 @@ function copyHeaders(headers: HeadersMap): HeadersMap {
   return { ...headers };
 }
 
-function isMaterial(
-  value: SignerCredentialMaterial | HeadersMap,
-): value is SignerCredentialMaterial {
-  const headers = (value as SignerCredentialMaterial).headers;
-  return Boolean(headers) && typeof headers === "object" && !Array.isArray(headers);
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function normalizeMaterial(value: SignerCredentialMaterial | HeadersMap): SignerCredentialMaterial {
-  if (isMaterial(value)) {
+function expiresInSecondsOf(value: Record<string, unknown>): number | undefined {
+  const ttl = value.expiresInSeconds;
+  if (typeof ttl === "number" && Number.isFinite(ttl)) return ttl;
+  return undefined;
+}
+
+function normalizeMaterial(value: SignerCredentialProviderResult): SignerCredentialMaterial {
+  if (!isPlainObject(value)) {
+    return { headers: {} };
+  }
+  const nested = value.headers;
+  if (isPlainObject(nested)) {
     return {
-      headers: copyHeaders(value.headers),
-      expiresInSeconds: value.expiresInSeconds,
+      headers: copyHeaders(nested as HeadersMap),
+      expiresInSeconds: expiresInSecondsOf(value),
     };
   }
-  return { headers: copyHeaders(value) };
+  const expiresInSeconds = expiresInSecondsOf(value);
+  const headers = copyHeaders(value as HeadersMap);
+  if (expiresInSeconds !== undefined) delete headers.expiresInSeconds;
+  return { headers, expiresInSeconds };
 }
 
 /**
  * Resolves signer request headers, optionally rotating them before expiry or
- * after HTTP 480. A static header bag never refreshes.
+ * after HTTP 401/403/480. A static header bag never refreshes.
  */
 export class SignerCredential {
   readonly key: string;
@@ -53,6 +67,7 @@ export class SignerCredential {
   private cached: HeadersMap | undefined;
   private expiresAtMs: number | undefined;
   private stale = false;
+  private generation = 0;
   private inflight: Promise<HeadersMap | undefined> | undefined;
 
   private constructor(options: {
@@ -74,11 +89,15 @@ export class SignerCredential {
     if (input instanceof SignerCredential) return input;
     const skewMs = Math.max(0, options?.skewMs ?? DEFAULT_SIGNER_REFRESH_SKEW_MS);
     if (typeof input === "function") {
-      return new SignerCredential({
+      const existing = providerCredentials.get(input);
+      if (existing) return existing;
+      const created = new SignerCredential({
         key: `provider:${nextProviderId++}`,
         provider: input,
         skewMs,
       });
+      providerCredentials.set(input, created);
+      return created;
     }
     const headers = input ? copyHeaders(input) : undefined;
     return new SignerCredential({
@@ -88,8 +107,12 @@ export class SignerCredential {
     });
   }
 
-  invalidate(): void {
+  /** Marks a provider credential stale. No-op for a static bag; returns whether a refresh will run. */
+  invalidate(): boolean {
+    if (!this.provider) return false;
     this.stale = true;
+    this.generation += 1;
+    return true;
   }
 
   async headers(): Promise<HeadersMap | undefined> {
@@ -114,13 +137,26 @@ export class SignerCredential {
   private async refresh(): Promise<HeadersMap | undefined> {
     const provider = this.provider;
     if (!provider) return this.cached;
+    const generation = this.generation;
     const value = await provider();
     const material = normalizeMaterial(value);
     this.cached = material.headers;
-    this.stale = false;
     const ttl = material.expiresInSeconds;
-    this.expiresAtMs =
-      ttl !== undefined && Number.isFinite(ttl) ? Date.now() + ttl * 1000 : undefined;
+    this.expiresAtMs = ttl !== undefined ? Date.now() + ttl * 1000 : undefined;
+    this.stale = generation !== this.generation;
     return this.cached;
+  }
+}
+
+/** Send once; on signer 401/403 invalidate and retry with a fresh provider token. */
+export async function sendWithSignerHeaders<T>(
+  credential: SignerCredential,
+  send: (headers: HeadersMap | undefined) => Promise<T>,
+): Promise<T> {
+  try {
+    return await send(await credential.headers());
+  } catch (e) {
+    if (!isUnauthorizedHttpError(e) || !credential.invalidate()) throw e;
+    return await send(await credential.headers());
   }
 }

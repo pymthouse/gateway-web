@@ -310,4 +310,94 @@ describe("signer", () => {
       await server.close();
     }
   });
+
+  it("401 on sign-orchestrator-info rotates and retries", async () => {
+    const { credential, callCount } = rotatingBearerCredential();
+    let infoHits = 0;
+    const authorizations: string[] = [];
+    const server = await startMockServer((req, res) => {
+      if (req.pathname === "/sign-orchestrator-info") {
+        authorizations.push(String(req.headers.authorization ?? ""));
+        infoHits += 1;
+        if (infoHits === 1) {
+          json(res, 401, { error: { message: "expired" } });
+          return;
+        }
+        json(res, 200, { address: "0xabc", signature: "0xsig" });
+        return;
+      }
+      json(res, 404, {});
+    });
+    try {
+      clearSignerInfoCache();
+      const info = await getSignerInfo(server.origin, credential);
+      expect(info).toEqual({ address: "0xabc", sig: "0xsig" });
+      expect(infoHits).toBe(2);
+      expect(callCount()).toBe(2);
+      expect(authorizations).toEqual(["Bearer t1", "Bearer t2"]);
+    } finally {
+      clearSignerInfoCache();
+      await server.close();
+    }
+  });
+
+  it("401 with a static bag is not retried", async () => {
+    let infoHits = 0;
+    const server = await startMockServer((req, res) => {
+      if (req.pathname === "/sign-orchestrator-info") {
+        infoHits += 1;
+        json(res, 401, { error: { message: "expired" } });
+        return;
+      }
+      json(res, 404, {});
+    });
+    try {
+      clearSignerInfoCache();
+      await expect(getSignerInfo(server.origin, { Authorization: "Bearer k" })).rejects.toThrow(
+        /401/,
+      );
+      expect(infoHits).toBe(1);
+    } finally {
+      clearSignerInfoCache();
+      await server.close();
+    }
+  });
+
+  it("401 on generate-live-payment rotates and retries without refresh-payment", async () => {
+    const authorizations: string[] = [];
+    let payHits = 0;
+    let refreshHits = 0;
+    const { credential } = rotatingBearerCredential();
+    await withLivePaymentSession(
+      (req, res) => {
+        if (replySignOrchestratorInfo(req, res)) return;
+        if (req.pathname === "/generate-live-payment") {
+          authorizations.push(String(req.headers.authorization ?? ""));
+          payHits += 1;
+          if (payHits === 1) {
+            json(res, 401, { error: { message: "expired" } });
+            return;
+          }
+          json(res, 200, { payment: "pay-2", segCreds: "seg-2", state: { n: 2 } });
+          return;
+        }
+        if (req.pathname === "/pay/refresh-payment") {
+          refreshHits += 1;
+          json(res, 200, { payment_params: "params-2" });
+          return;
+        }
+        json(res, 404, {});
+      },
+      (origin) => ({
+        type: "fixed",
+        signerHeaders: credential,
+        challenge: fixedChallenge(origin),
+      }),
+      async (session) => {
+        expect(await session.getPayment()).toEqual({ payment: "pay-2", segCreds: "seg-2" });
+        expect(authorizations).toEqual(["Bearer t1", "Bearer t2"]);
+        expect(refreshHits).toBe(0);
+      },
+    );
+  });
 });

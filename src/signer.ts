@@ -7,7 +7,7 @@ import {
   SkipPaymentCycle,
 } from "./errors.js";
 import { httpOrigin, postEmpty, postJson } from "./http.js";
-import { SignerCredential } from "./signer-credential.js";
+import { sendWithSignerHeaders, SignerCredential } from "./signer-credential.js";
 import { stripTrailingSlashes } from "./strings.js";
 import type {
   GetPaymentResponse,
@@ -58,14 +58,16 @@ export async function getSignerInfo(
   const pending = (async () => {
     const url = `${httpOrigin(signerUrl)}/sign-orchestrator-info`;
     try {
-      const data = await postJson(
-        url,
-        {},
-        {
-          headers: await credential.headers(),
-          timeoutMs: 5_000,
-          insecureTls: false,
-        },
+      const data = await sendWithSignerHeaders(credential, (headers) =>
+        postJson(
+          url,
+          {},
+          {
+            headers,
+            timeoutMs: 5_000,
+            insecureTls: false,
+          },
+        ),
       );
       return signerMaterialFromJson(data, url);
     } catch (e) {
@@ -274,11 +276,13 @@ export class LivePaymentSession {
     if (this.gatewayRequestId) payload.gatewayRequestId = this.gatewayRequestId;
     if (this.attributionSource) payload.attributionSource = this.attributionSource;
 
-    const data = await postJson(url, payload, {
-      headers: await this.credential.headers(),
-      timeoutMs: 15_000,
-      insecureTls: false,
-    });
+    const data = await sendWithSignerHeaders(this.credential, (headers) =>
+      postJson(url, payload, {
+        headers,
+        timeoutMs: 15_000,
+        insecureTls: false,
+      }),
+    );
 
     const payment = data.payment;
     if (typeof payment !== "string" || !payment) {

@@ -8,6 +8,7 @@ export {
   SkipPaymentCycle,
   attachGatewayRequestId,
   attachProviderRequestId,
+  isUnauthorizedHttpError,
 } from "./errors.js";
 export type { RunnerRejection } from "./errors.js";
 
@@ -70,7 +71,8 @@ export type { AwaitQueueOptions, QueueHandle, QueueProgress } from "./queue.js";
 export { getSignerInfo, LivePaymentSession, PAYMENT_INTERVAL_MS } from "./signer.js";
 export type { LivePaymentSessionOptions, PaymentSessionSnapshot } from "./signer.js";
 
-export { DEFAULT_SIGNER_REFRESH_SKEW_MS } from "./signer-credential.js";
+export { DEFAULT_SIGNER_REFRESH_SKEW_MS, SignerCredential } from "./signer-credential.js";
+export type { SignerCredentialOptions } from "./signer-credential.js";
 
 export { httpOrigin, joinEndpoint, parseHttpUrl, PROVIDER_REQUEST_ID_HEADER } from "./http.js";
 
@@ -82,8 +84,10 @@ export type {
   LivePaymentChallenge,
   LiveRunnerInstance,
   LiveRunnerPriceInfo,
+  SignerCredentialBag,
   SignerCredentialInput,
   SignerCredentialMaterial,
   SignerCredentialProvider,
+  SignerCredentialProviderResult,
   SignerMaterial,
 } from "./types.js";

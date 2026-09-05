@@ -55,7 +55,7 @@ export interface GatewayConfig {
   attributionSource?: string;
   /**
    * Refresh a provider credential this many milliseconds before expiresInSeconds.
-   * Default 30_000. Ignored for static header bags.
+   * Default 30_000. Ignored for static header bags. Signer 401/403 also rotates.
    */
   signerRefreshSkewMs?: number;
 }
