@@ -29,6 +29,7 @@ export interface LiveRunnerCallResult {
   paymentSession: LivePaymentSession | null;
   content: Buffer | null;
   contentType: string;
+  providerRequestId: string | null;
 }
 
 export interface CallRunnerOptions {
@@ -241,7 +242,7 @@ async function attemptPaidCall(input: PaidAttemptInput): Promise<PaidAttemptResu
 
   const funding = needsOngoingFunding && paymentSession ? paymentSession.startFunding() : null;
   try {
-    const { body, contentType } = await requestBody(input.runnerUrl, {
+    const { body, contentType, providerRequestId } = await requestBody(input.runnerUrl, {
       method: input.method,
       payload: input.requestPayload,
       headers: requestHeaders,
@@ -252,6 +253,10 @@ async function attemptPaidCall(input: PaidAttemptInput): Promise<PaidAttemptResu
     const isJson = isJsonContentType(contentType);
     const data = isJson ? parseRunnerJsonBody(body, input.runnerUrl, contentType) : {};
     const dataSessionId = data.session_id;
+    const bodyRequestId =
+      typeof data.request_id === "string" && data.request_id.trim()
+        ? data.request_id.trim()
+        : null;
     return {
       kind: "success",
       result: {
@@ -262,6 +267,7 @@ async function attemptPaidCall(input: PaidAttemptInput): Promise<PaidAttemptResu
         paymentSession: input.paymentType === "fixed" ? null : paymentSession,
         content: isJson ? null : body,
         contentType,
+        providerRequestId: providerRequestId ?? bodyRequestId,
       },
     };
   } catch (e) {

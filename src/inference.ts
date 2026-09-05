@@ -176,6 +176,7 @@ function buildInferenceResult(options: {
   data: Record<string, unknown>;
   t0: number;
   gatewayRequestId: string;
+  providerRequestId?: string | null;
 }): InferenceResult {
   const url = extractMediaUrl(options.data) ?? extractMediaUrl({ data: options.data });
   const kind = capabilityMediaKind(options.req.capability);
@@ -193,7 +194,7 @@ function buildInferenceResult(options: {
     audioUrl: kind === "audio" ? url : null,
     gatewayRequestId: options.gatewayRequestId,
     status: url ? "completed" : (handle?.status ?? null),
-    providerRequestId: handle?.requestId ?? null,
+    providerRequestId: handle?.requestId ?? options.providerRequestId ?? null,
     statusUrl: url ? null : (handle?.statusUrl ?? null),
     responseUrl: url ? null : (handle?.responseUrl ?? null),
   };
@@ -294,7 +295,7 @@ export function createGateway(config: GatewayConfig): Gateway {
       gatewayRequestId,
       attributionSource: config.attributionSource ?? null,
     });
-    return { runnerUrl, data: result.data };
+    return { runnerUrl, data: result.data, providerRequestId: result.providerRequestId };
   }
 
   async function runPersistent(
@@ -322,7 +323,7 @@ export function createGateway(config: GatewayConfig): Gateway {
         timeoutMs,
         insecureTls,
       });
-      return { runnerUrl: result.runnerUrl, data: result.data };
+      return { runnerUrl: result.runnerUrl, data: result.data, providerRequestId: null };
     } finally {
       try {
         await stopRunnerSession(session, { timeoutMs: 5_000, insecureTls });
@@ -385,6 +386,7 @@ export function createGateway(config: GatewayConfig): Gateway {
               data,
               t0,
               gatewayRequestId,
+              providerRequestId: result.providerRequestId,
             });
           } catch (e) {
             lastError = e;

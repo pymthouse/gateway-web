@@ -7,6 +7,7 @@ export {
   SignerRefreshRequired,
   SkipPaymentCycle,
   attachGatewayRequestId,
+  attachProviderRequestId,
 } from "./errors.js";
 export type { RunnerRejection } from "./errors.js";
 
@@ -69,7 +70,7 @@ export type { AwaitQueueOptions, QueueHandle, QueueProgress } from "./queue.js";
 export { getSignerInfo, LivePaymentSession, PAYMENT_INTERVAL_MS } from "./signer.js";
 export type { LivePaymentSessionOptions, PaymentSessionSnapshot } from "./signer.js";
 
-export { httpOrigin, joinEndpoint, parseHttpUrl } from "./http.js";
+export { httpOrigin, joinEndpoint, parseHttpUrl, PROVIDER_REQUEST_ID_HEADER } from "./http.js";
 
 export type {
   DiscoveryEntry,

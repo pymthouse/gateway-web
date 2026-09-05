@@ -4,12 +4,14 @@ import {
   LivepeerHTTPError,
   SignerRefreshRequired,
   SkipPaymentCycle,
+  attachProviderRequestId,
 } from "./errors.js";
 import { stripTrailingSlashes } from "./strings.js";
 import type { HeadersMap, HttpHeaderBag } from "./types.js";
 
 const USER_AGENT = "pymthouse-gateway-web/0.2.0";
 const REFRESH_SESSION_ORCHESTRATOR_URL_HEADER = "Livepeer-Orchestrator-URL";
+export const PROVIDER_REQUEST_ID_HEADER = "Livepeer-Provider-Request-Id";
 
 let insecureAgent: Agent | undefined;
 
@@ -100,6 +102,26 @@ function headerValue(headers: HttpHeaderBag, name: string): string | null {
     if (typeof raw === "string" && raw.trim()) return raw.trim();
   }
   return null;
+}
+
+function providerRequestIdFromHeaders(headers: HttpHeaderBag): string | null {
+  return headerValue(headers, PROVIDER_REQUEST_ID_HEADER);
+}
+
+function errorStatusFromRunnerBody(body: string, httpStatus: number): number | null {
+  try {
+    const data: unknown = JSON.parse(body);
+    if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+    const err = (data as { error?: unknown }).error;
+    if (!err || typeof err !== "object" || Array.isArray(err)) return null;
+    const status = (err as { status?: unknown }).status;
+    if (typeof status === "number" && status >= 400 && status <= 599) return status;
+    if ((err as { stage?: unknown }).stage === "timeout") return 504;
+    if (httpStatus < 400) return 502;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export function raiseHttpJsonError(
@@ -205,10 +227,12 @@ export async function requestBody(
   body: Buffer;
   contentType: string;
   headers: HttpHeaderBag;
+  providerRequestId: string | null;
 }> {
   const timeoutMs = options.timeoutMs ?? 5_000;
   const { method, headers, body } = jsonRequestParts(options);
   const requestUrl = parseHttpUrl(url).toString();
+  let providerRequestId: string | null = null;
   try {
     const res = await request(requestUrl, {
       method,
@@ -218,21 +242,34 @@ export async function requestBody(
       signal: AbortSignal.timeout(timeoutMs),
       headersTimeout: timeoutMs,
       bodyTimeout: timeoutMs,
+      onInfo: (info) => {
+        const earlyId = providerRequestIdFromHeaders(info.headers as HttpHeaderBag);
+        if (earlyId) providerRequestId = earlyId;
+      },
     });
+    const responseHeaders = res.headers as HttpHeaderBag;
+    providerRequestId =
+      providerRequestIdFromHeaders(responseHeaders) ?? providerRequestId;
     const raw = await readResponseBody(res.body);
     const contentType =
       typeof res.headers["content-type"] === "string" ? res.headers["content-type"] : "";
-    const responseHeaders = res.headers as HttpHeaderBag;
+    const text = raw.toString("utf8");
     if (isRedirectStatus(res.statusCode) || res.statusCode >= 400) {
-      raiseHttpJsonError(res.statusCode, requestUrl, raw.toString("utf8"), responseHeaders);
+      raiseHttpJsonError(res.statusCode, requestUrl, text, responseHeaders);
+    }
+    const runnerErrorStatus = errorStatusFromRunnerBody(text, res.statusCode);
+    if (runnerErrorStatus != null) {
+      raiseHttpJsonError(runnerErrorStatus, requestUrl, text, responseHeaders);
     }
     assertJsonSubmitHasBody(method, body, raw, requestUrl, res.statusCode);
     return {
       body: raw,
       contentType,
       headers: responseHeaders,
+      providerRequestId,
     };
   } catch (e) {
+    attachProviderRequestId(e, providerRequestId);
     rethrowHttpFailure(e, requestUrl);
   }
 }
