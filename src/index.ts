@@ -80,5 +80,9 @@ export type {
   LivePaymentChallenge,
   LiveRunnerInstance,
   LiveRunnerPriceInfo,
+  LiveRunnerQuote,
+  LiveRunnerSellPrice,
+  LiveRunnerUpstreamPrice,
+  LiveRunnerUsageAttestation,
   SignerMaterial,
 } from "./types.js";

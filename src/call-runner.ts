@@ -7,6 +7,8 @@ import type {
   LivePaymentChallenge,
   LiveRunnerInstance,
   LiveRunnerPriceInfo,
+  LiveRunnerQuote,
+  LiveRunnerUsageAttestation,
 } from "./types.js";
 
 const LIVE_RUNNER_PAYER_ADDRESS_HEADER = "Livepeer-Payer-Address";
@@ -17,6 +19,7 @@ const RUNNER_PAYMENT_TYPES_BY_UNIT: Record<string, string> = {
   "720p": "lv2v",
   "720p-pixel-seconds": "lv2v",
   fixed: "fixed",
+  usage: "usage",
 };
 
 const METERED_PAYMENT_TYPES = new Set(["live", "lv2v"]);
@@ -30,6 +33,10 @@ export interface LiveRunnerCallResult {
   content: Buffer | null;
   contentType: string;
   providerRequestId: string | null;
+  quote: LiveRunnerQuote | null;
+  billableUnits: number | string | null;
+  settledCostWei: string | null;
+  usageAttestation: LiveRunnerUsageAttestation | null;
 }
 
 export interface CallRunnerOptions {
@@ -57,6 +64,9 @@ export function runnerPaymentType(
   const explicitUnit = String(paymentUnit ?? "")
     .trim()
     .toLowerCase();
+  if (runner?.priceInfo?.sell) {
+    return "usage";
+  }
   const discoveredUnit =
     runner?.priceInfo != null
       ? String(runner.priceInfo.unit ?? "")
@@ -85,8 +95,11 @@ export function runnerPaymentType(
 
 export function padRunnerPrice(priceInfo: LiveRunnerPriceInfo): LiveRunnerPriceInfo {
   const price = Number(String(priceInfo.price).trim());
-  if (!Number.isFinite(price)) return priceInfo;
-  return { ...priceInfo, price: price * 1.012 };
+  const padded = Number.isFinite(price) ? { ...priceInfo, price: price * 1.012 } : { ...priceInfo };
+  if (priceInfo.sell) {
+    return { ...padded, unit: "usage" };
+  }
+  return padded;
 }
 
 function parseRunnerPaymentChallenge(error: LivepeerHTTPError): LivePaymentChallenge {
@@ -116,7 +129,18 @@ function parseRunnerPaymentChallenge(error: LivepeerHTTPError): LivePaymentChall
     paymentParams,
     manifestId,
     paymentUrl,
+    quote: parseLiveRunnerQuote(rec.quote),
   };
+}
+
+function parseLiveRunnerQuote(value: unknown): LiveRunnerQuote | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const rec = value as Record<string, unknown>;
+  const quoteId = rec.quote_id;
+  const sellPrice = rec.sell_price;
+  if (typeof quoteId !== "string" || !quoteId) return null;
+  if (typeof sellPrice !== "string" && typeof sellPrice !== "number") return null;
+  return rec as LiveRunnerQuote;
 }
 
 async function getRunnerPayment(options: {
@@ -217,12 +241,18 @@ function toPaidCallResult(
   input: PaidAttemptInput,
   sessionId: string,
   paymentSession: LivePaymentSession | null,
-  response: { body: Buffer; contentType: string; providerRequestId: string | null },
+  response: {
+    body: Buffer;
+    contentType: string;
+    providerRequestId: string | null;
+    headers?: Record<string, string | string[] | undefined>;
+  },
 ): LiveRunnerCallResult {
   const isJson = isJsonContentType(response.contentType);
   const data = isJson
     ? parseRunnerJsonBody(response.body, input.runnerUrl, response.contentType)
     : {};
+  const attestation = parseUsageAttestation(response.headers);
   return {
     data,
     runnerUrl: input.runnerUrl,
@@ -232,7 +262,34 @@ function toPaidCallResult(
     content: isJson ? null : response.body,
     contentType: response.contentType,
     providerRequestId: response.providerRequestId ?? nonEmptyString(data.request_id),
+    quote: paymentSession?.quote() ?? input.challenge?.quote ?? null,
+    billableUnits: attestation?.billable_units ?? null,
+    settledCostWei: attestation?.cost_wei ?? null,
+    usageAttestation: attestation,
   };
+}
+
+function parseUsageAttestation(
+  headers: Record<string, string | string[] | undefined> | undefined,
+): LiveRunnerUsageAttestation | null {
+  if (!headers) return null;
+  let raw: string | undefined;
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() !== "x-livepeer-usage-attestation") continue;
+    raw = Array.isArray(value) ? value[0] : value;
+    break;
+  }
+  if (!raw) return null;
+  try {
+    const decoded = Buffer.from(raw, "base64").toString("utf8");
+    const parsed = JSON.parse(decoded) as LiveRunnerUsageAttestation;
+    if (!parsed || typeof parsed !== "object" || typeof parsed.quote_id !== "string") {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 async function attemptPaidCall(input: PaidAttemptInput): Promise<PaidAttemptResult> {
@@ -322,7 +379,13 @@ export async function callRunner(options: CallRunnerOptions): Promise<LiveRunner
       gatewayRequestId: options.gatewayRequestId ?? null,
       attributionSource: options.attributionSource ?? null,
     });
-    if (outcome.kind === "success") return outcome.result;
+    if (outcome.kind === "success") {
+      const result = outcome.result;
+      if (result.paymentSession && result.usageAttestation) {
+        await result.paymentSession.settleUsage(result.usageAttestation);
+      }
+      return result;
+    }
     challenge = outcome.challenge;
   }
 

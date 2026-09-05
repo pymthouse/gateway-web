@@ -6,6 +6,7 @@ import {
   pickInferencePool,
   pickRunner,
   pickRunners,
+  priceInfoFromJson,
   resolveApp,
 } from "../src/select.js";
 import type { DiscoveryEntry } from "../src/types.js";
@@ -54,6 +55,26 @@ describe("select", () => {
     expect(advertisedMode("single-shot")).toBe("single-shot");
     expect(advertisedMode("persistent")).toBe("persistent");
     expect(advertisedMode("PERSISTENT")).toBe("persistent");
+  });
+
+  it("priceInfoFromJson parses upstream and sell", () => {
+    const info = priceInfoFromJson({
+      price: "10",
+      currency: "wei",
+      unit: "usage",
+      upstream: {
+        provider: "fal",
+        endpoint_id: "fal-ai/flux/dev",
+        unit: "image",
+        unit_price: "0.025",
+        currency: "USD",
+      },
+      sell: { unit: "image", price: "0.02625", currency: "USD", upcharge_bps: 500 },
+    });
+    expect(info?.unit).toBe("usage");
+    expect(info?.upstream?.endpointId).toBe("fal-ai/flux/dev");
+    expect(info?.sell?.price).toBe("0.02625");
+    expect(info?.sell?.upchargeBps).toBe(500);
   });
 
   it("normalizeAppBase suffixes /app/ so Go mux does not 301 the POST", () => {

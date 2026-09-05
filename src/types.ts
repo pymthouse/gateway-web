@@ -1,7 +1,48 @@
+export interface LiveRunnerUpstreamPrice {
+  provider?: string;
+  endpointId?: string;
+  unit?: string;
+  unitPrice?: number | string;
+  currency?: string;
+  fetchedAt?: string;
+}
+
+export interface LiveRunnerSellPrice {
+  unit?: string;
+  price: number | string;
+  currency?: string;
+  upchargeBps?: number;
+}
+
 export interface LiveRunnerPriceInfo {
   price: number | string;
   currency: string;
   unit: string;
+  upstream?: LiveRunnerUpstreamPrice | null;
+  sell?: LiveRunnerSellPrice | null;
+}
+
+export interface LiveRunnerQuote {
+  quote_id: string;
+  app?: string;
+  manifest_id?: string;
+  sell_price: number | string;
+  sell_unit?: string;
+  upcharge_bps?: number;
+  wei_price_per_unit?: number;
+  wei_pixels_per_unit?: number;
+  max_units?: number | string;
+  expires_at?: number;
+  orch_sig?: string;
+  upstream?: LiveRunnerUpstreamPrice | null;
+}
+
+export interface LiveRunnerUsageAttestation {
+  quote_id: string;
+  billable_units: number | string;
+  sell_price: number | string;
+  cost_wei: string;
+  orch_sig?: string;
 }
 
 export interface LiveRunnerInstance {
@@ -26,6 +67,7 @@ export interface LivePaymentChallenge {
   paymentParams: string;
   manifestId: string;
   paymentUrl: string;
+  quote?: LiveRunnerQuote | null;
 }
 
 export interface GetPaymentResponse {

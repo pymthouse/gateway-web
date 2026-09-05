@@ -29,7 +29,7 @@ import {
   type CallSessionResult,
   type RunnerSession,
 } from "./session.js";
-import type { HeadersMap, LiveRunnerInstance } from "./types.js";
+import type { HeadersMap, LiveRunnerInstance, LiveRunnerQuote } from "./types.js";
 
 export interface GatewayConfig {
   signerUrl: string;
@@ -95,6 +95,9 @@ export interface InferenceResult {
   providerRequestId: string | null;
   statusUrl: string | null;
   responseUrl: string | null;
+  quote: LiveRunnerQuote | null;
+  billableUnits: number | string | null;
+  settledCostWei: string | null;
 }
 
 function lastAppSegment(app: string): string {
@@ -177,6 +180,9 @@ function buildInferenceResult(options: {
   t0: number;
   gatewayRequestId: string;
   providerRequestId?: string | null;
+  quote?: LiveRunnerQuote | null;
+  billableUnits?: number | string | null;
+  settledCostWei?: string | null;
 }): InferenceResult {
   const url = extractMediaUrl(options.data) ?? extractMediaUrl({ data: options.data });
   const kind = capabilityMediaKind(options.req.capability);
@@ -197,6 +203,9 @@ function buildInferenceResult(options: {
     providerRequestId: handle?.requestId ?? options.providerRequestId ?? null,
     statusUrl: url ? null : (handle?.statusUrl ?? null),
     responseUrl: url ? null : (handle?.responseUrl ?? null),
+    quote: options.quote ?? null,
+    billableUnits: options.billableUnits ?? null,
+    settledCostWei: options.settledCostWei ?? null,
   };
 }
 
@@ -295,7 +304,14 @@ export function createGateway(config: GatewayConfig): Gateway {
       gatewayRequestId,
       attributionSource: config.attributionSource ?? null,
     });
-    return { runnerUrl, data: result.data, providerRequestId: result.providerRequestId };
+    return {
+      runnerUrl,
+      data: result.data,
+      providerRequestId: result.providerRequestId,
+      quote: result.quote,
+      billableUnits: result.billableUnits,
+      settledCostWei: result.settledCostWei,
+    };
   }
 
   async function runPersistent(
@@ -387,6 +403,9 @@ export function createGateway(config: GatewayConfig): Gateway {
               t0,
               gatewayRequestId,
               providerRequestId: result.providerRequestId,
+              quote: "quote" in result ? result.quote : null,
+              billableUnits: "billableUnits" in result ? result.billableUnits : null,
+              settledCostWei: "settledCostWei" in result ? result.settledCostWei : null,
             });
           } catch (e) {
             lastError = e;

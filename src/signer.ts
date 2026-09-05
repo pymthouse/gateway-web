@@ -13,6 +13,8 @@ import type {
   HeadersMap,
   LivePaymentChallenge,
   LiveRunnerPriceInfo,
+  LiveRunnerQuote,
+  LiveRunnerUsageAttestation,
   SignerMaterial,
 } from "./types.js";
 
@@ -162,6 +164,10 @@ export class LivePaymentSession {
     this.state = options.state ?? null;
   }
 
+  quote(): LiveRunnerQuote | null {
+    return this.challenge.quote ?? null;
+  }
+
   snapshot(): PaymentSessionSnapshot {
     return {
       type: this.type,
@@ -275,6 +281,7 @@ export class LivePaymentSession {
     };
     if (this.app) payload.app = this.app;
     if (this.maxPrice !== null) payload.maxPrice = { ...this.maxPrice };
+    if (this.challenge.quote) payload.quote = this.challenge.quote;
     if (this.state !== null) payload.state = this.state;
     if (this.gatewayRequestId) payload.gatewayRequestId = this.gatewayRequestId;
     if (this.attributionSource) payload.attributionSource = this.attributionSource;
@@ -333,6 +340,29 @@ export class LivePaymentSession {
       ...this.challenge,
       paymentParams,
     };
+  }
+
+  async settleUsage(attestation: LiveRunnerUsageAttestation): Promise<void> {
+    if (!this.signerUrl) {
+      throw new LivepeerGatewayError("settleUsage requires signerUrl");
+    }
+    const url = `${httpOrigin(this.signerUrl)}/generate-live-payment`;
+    const payload: Record<string, unknown> = {
+      orchestrator: this.challenge.paymentParams,
+      type: "usage",
+      ManifestID: this.challenge.manifestId,
+      attestation,
+    };
+    if (this.app) payload.app = this.app;
+    if (this.challenge.quote) payload.quote = this.challenge.quote;
+    if (this.state !== null) payload.state = this.state;
+    if (this.gatewayRequestId) payload.gatewayRequestId = this.gatewayRequestId;
+    if (this.attributionSource) payload.attributionSource = this.attributionSource;
+    await postJson(url, payload, {
+      headers: this.signerHeaders,
+      timeoutMs: 15_000,
+      insecureTls: false,
+    });
   }
 }
 

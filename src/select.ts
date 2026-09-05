@@ -29,11 +29,37 @@ export function priceInfoFromJson(value: unknown): LiveRunnerPriceInfo | null {
   if (typeof price !== "number" && typeof price !== "string") return null;
   const currency = rec.currency;
   const unit = rec.unit;
-  return {
+  const info: LiveRunnerPriceInfo = {
     price,
     currency: typeof currency === "string" ? currency.trim().toLowerCase() : "",
     unit: typeof unit === "string" ? unit.trim().toLowerCase() : "",
   };
+  if (rec.upstream && typeof rec.upstream === "object" && !Array.isArray(rec.upstream)) {
+    const up = rec.upstream as Record<string, unknown>;
+    info.upstream = {
+      provider: typeof up.provider === "string" ? up.provider : undefined,
+      endpointId: typeof up.endpoint_id === "string" ? up.endpoint_id : undefined,
+      unit: typeof up.unit === "string" ? up.unit : undefined,
+      unitPrice:
+        typeof up.unit_price === "string" || typeof up.unit_price === "number"
+          ? up.unit_price
+          : undefined,
+      currency: typeof up.currency === "string" ? up.currency : undefined,
+      fetchedAt: typeof up.fetched_at === "string" ? up.fetched_at : undefined,
+    };
+  }
+  if (rec.sell && typeof rec.sell === "object" && !Array.isArray(rec.sell)) {
+    const sell = rec.sell as Record<string, unknown>;
+    if (typeof sell.price === "string" || typeof sell.price === "number") {
+      info.sell = {
+        price: sell.price,
+        unit: typeof sell.unit === "string" ? sell.unit : undefined,
+        currency: typeof sell.currency === "string" ? sell.currency : undefined,
+        upchargeBps: typeof sell.upcharge_bps === "number" ? sell.upcharge_bps : undefined,
+      };
+    }
+  }
+  return info;
 }
 
 export function instancesFromDiscovery(entries: DiscoveryEntry[]): LiveRunnerInstance[] {
