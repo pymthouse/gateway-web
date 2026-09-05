@@ -8,7 +8,8 @@ import {
   requestBody,
 } from "./http.js";
 import type { LivePaymentSession } from "./signer.js";
-import type { HeadersMap, LiveRunnerInstance } from "./types.js";
+import type { SignerCredential } from "./signer-credential.js";
+import type { LiveRunnerInstance, SignerCredentialInput } from "./types.js";
 
 export interface RunnerSession {
   sessionId: string;
@@ -25,7 +26,7 @@ export interface ReserveSessionOptions {
   runner: LiveRunnerInstance;
   payload?: Record<string, unknown>;
   signerUrl: string;
-  signerHeaders?: HeadersMap;
+  signerHeaders?: SignerCredentialInput | SignerCredential;
   timeoutMs?: number;
   insecureTls?: boolean;
   /**

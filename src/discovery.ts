@@ -1,6 +1,7 @@
 import { LivepeerGatewayError, RemoteSignerError } from "./errors.js";
 import { getJson, httpOrigin, parseHttpUrl } from "./http.js";
-import type { DiscoveryEntry, FilterValue, HeadersMap } from "./types.js";
+import { SignerCredential } from "./signer-credential.js";
+import type { DiscoveryEntry, FilterValue, HeadersMap, SignerCredentialInput } from "./types.js";
 
 function normalizeFilterValues(value: FilterValue | undefined): string[] {
   if (value === undefined) return [];
@@ -94,7 +95,7 @@ function filterRunnerDiscoveryEntries(
 
 export interface DiscoverRunnersOptions {
   signerUrl?: string;
-  signerHeaders?: HeadersMap;
+  signerHeaders?: SignerCredentialInput | SignerCredential;
   discoveryUrl?: string;
   discoveryHeaders?: HeadersMap;
   app?: FilterValue;
@@ -116,7 +117,7 @@ export async function discoverRunners(options: DiscoverRunnersOptions): Promise<
     requestHeaders = options.discoveryHeaders;
   } else if (options.signerUrl) {
     discoveryEndpoint = defaultDiscoveryUrl(options.signerUrl);
-    requestHeaders = options.signerHeaders;
+    requestHeaders = await SignerCredential.from(options.signerHeaders).headers();
   } else {
     throw new LivepeerGatewayError("discoverRunners requires discoveryUrl or signerUrl");
   }

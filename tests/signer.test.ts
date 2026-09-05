@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PaymentError, SignerRefreshRequired } from "../src/errors.js";
+import { SignerCredential } from "../src/signer-credential.js";
 import { clearSignerInfoCache, getSignerInfo, LivePaymentSession } from "../src/signer.js";
 import { json, startMockServer } from "./mock-server.js";
 import {
   fixedChallenge,
   replySignOrchestratorInfo,
+  rotatingBearerCredential,
   shortChallenge,
   withCapturedMints,
   withLivePaymentSession,
@@ -192,5 +194,120 @@ describe("signer", () => {
         await expect(session.getPayment()).rejects.toBeInstanceOf(PaymentError);
       },
     );
+  });
+
+  it("getSignerInfo cache survives a rotating provider token", async () => {
+    let infoHits = 0;
+    const { credential, callCount } = rotatingBearerCredential();
+    const server = await startMockServer((req, res) => {
+      if (replySignOrchestratorInfo(req, res)) {
+        infoHits += 1;
+        return;
+      }
+      json(res, 404, {});
+    });
+    try {
+      clearSignerInfoCache();
+      const a = await getSignerInfo(server.origin, credential);
+      credential.invalidate();
+      await credential.headers();
+      const b = await getSignerInfo(server.origin, credential);
+      expect(a).toEqual({ address: "0xabc", sig: "0xsig" });
+      expect(b).toEqual(a);
+      expect(infoHits).toBe(1);
+      expect(callCount()).toBe(2);
+    } finally {
+      clearSignerInfoCache();
+      await server.close();
+    }
+  });
+
+  it("480 with state invalidates the credential and retries with a new bearer", async () => {
+    const authorizations: string[] = [];
+    let payHits = 0;
+    const { credential } = rotatingBearerCredential();
+    await withLivePaymentSession(
+      (req, res) => {
+        if (replySignOrchestratorInfo(req, res)) return;
+        if (req.pathname === "/generate-live-payment") {
+          authorizations.push(String(req.headers.authorization ?? ""));
+          payHits += 1;
+          if (payHits === 1) {
+            json(res, 200, { payment: "pay-1", segCreds: "seg-1", state: { n: 1 } });
+            return;
+          }
+          if (payHits === 2) {
+            json(res, 480, { error: { message: "refresh" } });
+            return;
+          }
+          json(res, 200, { payment: "pay-2", segCreds: "seg-2", state: { n: 2 } });
+          return;
+        }
+        if (req.pathname === "/pay/refresh-payment") {
+          json(res, 200, { payment_params: "params-2" });
+          return;
+        }
+        json(res, 404, {});
+      },
+      (origin) => ({
+        type: "fixed",
+        signerHeaders: credential,
+        challenge: fixedChallenge(origin),
+      }),
+      async (session) => {
+        expect(await session.getPayment()).toEqual({ payment: "pay-1", segCreds: "seg-1" });
+        expect(await session.getPayment()).toEqual({ payment: "pay-2", segCreds: "seg-2" });
+        expect(authorizations).toEqual(["Bearer t1", "Bearer t1", "Bearer t2"]);
+      },
+    );
+  });
+
+  it("funding cycle after expiry posts the rotated Authorization header", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const authorizations: string[] = [];
+    let calls = 0;
+    const cred = SignerCredential.from(
+      () => {
+        calls += 1;
+        return {
+          headers: { Authorization: `Bearer t${calls}` },
+          expiresInSeconds: 90,
+        };
+      },
+      { skewMs: 30_000 },
+    );
+    const server = await startMockServer((req, res) => {
+      if (req.pathname === "/generate-live-payment") {
+        authorizations.push(String(req.headers.authorization ?? ""));
+        json(res, 200, {
+          payment: `pay-${authorizations.length}`,
+          segCreds: "seg",
+          state: { n: authorizations.length },
+        });
+        return;
+      }
+      json(res, 404, {});
+    });
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      const session = new LivePaymentSession({
+        signerUrl: server.origin,
+        signerHeaders: cred,
+        type: "live",
+        challenge: {
+          paymentParams: "params-1",
+          manifestId: "man-1",
+          paymentUrl: `${server.origin}/pay`,
+        },
+      });
+      await session.getPayment();
+      expect(authorizations).toEqual(["Bearer t1"]);
+      vi.setSystemTime(new Date("2026-01-01T00:01:00Z"));
+      await session.getPayment();
+      expect(authorizations).toEqual(["Bearer t1", "Bearer t2"]);
+    } finally {
+      vi.useRealTimers();
+      await server.close();
+    }
   });
 });

@@ -42,3 +42,15 @@ export type HeadersMap = Record<string, string>;
 
 /** Incoming HTTP header bag from undici (`string` or multi-value arrays). */
 export type HttpHeaderBag = Record<string, string | string[] | undefined>;
+
+export interface SignerCredentialMaterial {
+  headers: HeadersMap;
+  /** Seconds until expiry. Enables refresh before use; omit to refresh only on 480. */
+  expiresInSeconds?: number;
+}
+
+export type SignerCredentialProvider = () =>
+  Promise<SignerCredentialMaterial | HeadersMap> | SignerCredentialMaterial | HeadersMap;
+
+/** Static signer headers, or a fal-style token provider that can rotate them. */
+export type SignerCredentialInput = HeadersMap | SignerCredentialProvider;

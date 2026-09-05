@@ -70,6 +70,8 @@ export type { AwaitQueueOptions, QueueHandle, QueueProgress } from "./queue.js";
 export { getSignerInfo, LivePaymentSession, PAYMENT_INTERVAL_MS } from "./signer.js";
 export type { LivePaymentSessionOptions, PaymentSessionSnapshot } from "./signer.js";
 
+export { DEFAULT_SIGNER_REFRESH_SKEW_MS } from "./signer-credential.js";
+
 export { httpOrigin, joinEndpoint, parseHttpUrl, PROVIDER_REQUEST_ID_HEADER } from "./http.js";
 
 export type {
@@ -80,5 +82,8 @@ export type {
   LivePaymentChallenge,
   LiveRunnerInstance,
   LiveRunnerPriceInfo,
+  SignerCredentialInput,
+  SignerCredentialMaterial,
+  SignerCredentialProvider,
   SignerMaterial,
 } from "./types.js";

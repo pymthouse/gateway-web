@@ -4,7 +4,7 @@ import { LivepeerGatewayError, LivepeerHTTPError } from "../src/errors.js";
 import { clearSignerInfoCache } from "../src/signer.js";
 import type { LiveRunnerInstance } from "../src/types.js";
 import { json, startMockServer } from "./mock-server.js";
-import { replySignOrchestratorInfo } from "./signer-test-helpers.js";
+import { replySignOrchestratorInfo, rotatingBearerCredential } from "./signer-test-helpers.js";
 
 function runner(overrides: Partial<LiveRunnerInstance> = {}): LiveRunnerInstance {
   return {
@@ -137,6 +137,58 @@ describe("callRunner", () => {
           signerUrl: server.origin,
         }),
       ).rejects.toBeInstanceOf(LivepeerHTTPError);
+    } finally {
+      clearSignerInfoCache();
+      await server.close();
+    }
+  });
+
+  it("480 on generate-live-payment retries with a rotated bearer", async () => {
+    const authorizations: string[] = [];
+    let appHits = 0;
+    let payHits = 0;
+    const { credential } = rotatingBearerCredential();
+    const server = await startMockServer((req, res) => {
+      if (replySignOrchestratorInfo(req, res)) return;
+      if (req.pathname === "/generate-live-payment") {
+        authorizations.push(String(req.headers.authorization ?? ""));
+        payHits += 1;
+        if (payHits === 1) {
+          json(res, 480, { error: { message: "refresh" } });
+          return;
+        }
+        json(res, 200, { payment: "PAY", segCreds: "SEG", state: { n: 1 } });
+        return;
+      }
+      if (req.pathname === "/app") {
+        appHits += 1;
+        if (appHits === 1 || payHits < 2) {
+          json(res, 402, {
+            payment_params: "opaque-params",
+            manifest_id: "man-9",
+            payment_url: `${req.url.origin}/pay`,
+          });
+          return;
+        }
+        json(res, 200, { url: "https://cdn.example/out.jpg" });
+        return;
+      }
+      json(res, 404, { error: { message: req.pathname } });
+    });
+    try {
+      clearSignerInfoCache();
+      const result = await callRunner({
+        runnerUrl: `${server.origin}/app`,
+        runner: runner({ url: `${server.origin}/app` }),
+        payload: { prompt: "a dragon" },
+        signerUrl: server.origin,
+        signerHeaders: credential,
+        timeoutMs: 5_000,
+      });
+      expect(result.data.url).toBe("https://cdn.example/out.jpg");
+      expect(authorizations[0]).toBe("Bearer t1");
+      expect(authorizations.at(-1)).toBe("Bearer t2");
+      expect(authorizations.length).toBeGreaterThanOrEqual(2);
     } finally {
       clearSignerInfoCache();
       await server.close();
