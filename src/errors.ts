@@ -1,6 +1,8 @@
 export class LivepeerGatewayError extends Error {
   /** Set after mint so a paid-then-failed call is still joinable. */
   gatewayRequestId: string | null = null;
+  /** Upstream fal/runner request id, when known. */
+  providerRequestId: string | null = null;
 
   constructor(message: string) {
     super(message);
@@ -27,6 +29,12 @@ export class LivepeerHTTPError extends LivepeerGatewayError {
     this.url = url;
     this.body = body;
   }
+}
+
+export function attachProviderRequestId(error: unknown, providerRequestId: string | null): void {
+  if (!providerRequestId || !(error instanceof LivepeerGatewayError)) return;
+  if (error.providerRequestId) return;
+  error.providerRequestId = providerRequestId;
 }
 
 export interface RunnerRejection {

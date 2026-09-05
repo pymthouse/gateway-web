@@ -125,7 +125,6 @@ export function extractQueueHandle(data: unknown, baseUrl?: string): QueueHandle
   const fromOutput = nested ? handleFromRecord(nested, baseUrl) : emptyHandle();
   const merged = mergeHandle(top, fromOutput);
   if (!handleLooksQueued(merged) && !merged.requestId) return null;
-  if (!handleLooksQueued(merged) && extractMediaUrl(data)) return null;
   return merged;
 }
 

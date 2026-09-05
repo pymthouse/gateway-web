@@ -30,12 +30,13 @@ describe("extractQueueHandle", () => {
     expect(handle?.status).toBe("IN_QUEUE");
   });
 
-  it("returns null for a completed media receipt", () => {
-    expect(
-      extractQueueHandle({
-        output: { images: [{ url: "https://cdn.example/out.png" }] },
-      }),
-    ).toBeNull();
+  it("keeps request_id on a completed media receipt", () => {
+    const handle = extractQueueHandle({
+      request_id: "req-123",
+      endpoint_id: "fal-ai/flux/schnell",
+      output: { images: [{ url: "https://cdn.example/out.png" }] },
+    });
+    expect(handle?.requestId).toBe("req-123");
   });
 });
 

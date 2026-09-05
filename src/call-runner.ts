@@ -29,6 +29,7 @@ export interface LiveRunnerCallResult {
   paymentSession: LivePaymentSession | null;
   content: Buffer | null;
   contentType: string;
+  providerRequestId: string | null;
 }
 
 export interface CallRunnerOptions {
@@ -208,6 +209,32 @@ type PaidAttemptResult =
   | { kind: "success"; result: LiveRunnerCallResult }
   | { kind: "retry"; challenge: LivePaymentChallenge | null };
 
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function toPaidCallResult(
+  input: PaidAttemptInput,
+  sessionId: string,
+  paymentSession: LivePaymentSession | null,
+  response: { body: Buffer; contentType: string; providerRequestId: string | null },
+): LiveRunnerCallResult {
+  const isJson = isJsonContentType(response.contentType);
+  const data = isJson
+    ? parseRunnerJsonBody(response.body, input.runnerUrl, response.contentType)
+    : {};
+  return {
+    data,
+    runnerUrl: input.runnerUrl,
+    runner: input.runner ?? null,
+    sessionId: sessionId || nonEmptyString(data.session_id) || "",
+    paymentSession: input.paymentType === "fixed" ? null : paymentSession,
+    content: isJson ? null : response.body,
+    contentType: response.contentType,
+    providerRequestId: response.providerRequestId ?? nonEmptyString(data.request_id),
+  };
+}
+
 async function attemptPaidCall(input: PaidAttemptInput): Promise<PaidAttemptResult> {
   let paymentSession: LivePaymentSession | null = null;
   let sessionId = "";
@@ -241,7 +268,7 @@ async function attemptPaidCall(input: PaidAttemptInput): Promise<PaidAttemptResu
 
   const funding = needsOngoingFunding && paymentSession ? paymentSession.startFunding() : null;
   try {
-    const { body, contentType } = await requestBody(input.runnerUrl, {
+    const response = await requestBody(input.runnerUrl, {
       method: input.method,
       payload: input.requestPayload,
       headers: requestHeaders,
@@ -249,20 +276,9 @@ async function attemptPaidCall(input: PaidAttemptInput): Promise<PaidAttemptResu
       insecureTls: input.insecureTls,
       accept: "*/*",
     });
-    const isJson = isJsonContentType(contentType);
-    const data = isJson ? parseRunnerJsonBody(body, input.runnerUrl, contentType) : {};
-    const dataSessionId = data.session_id;
     return {
       kind: "success",
-      result: {
-        data,
-        runnerUrl: input.runnerUrl,
-        runner: input.runner ?? null,
-        sessionId: sessionId || (typeof dataSessionId === "string" ? dataSessionId.trim() : ""),
-        paymentSession: input.paymentType === "fixed" ? null : paymentSession,
-        content: isJson ? null : body,
-        contentType,
-      },
+      result: toPaidCallResult(input, sessionId, paymentSession, response),
     };
   } catch (e) {
     return { kind: "retry", challenge: asPaymentChallenge(e, input.signerUrl) };
