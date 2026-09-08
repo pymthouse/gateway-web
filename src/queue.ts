@@ -160,7 +160,7 @@ function deriveResponseUrl(handle: QueueHandle): string | null {
   } catch {
     return null;
   }
-  }
+}
 
 function asJsonObject(value: unknown, stage: string): Record<string, unknown> {
   const rec = asRecord(value);

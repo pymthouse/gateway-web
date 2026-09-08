@@ -88,7 +88,8 @@ export class SignerCredential {
   /**
    * Interns a provider function by identity and `skewMs`. The first
    * `from(fn, { skewMs })` for that pair is reused; a different skew
-   * yields a separate credential.
+   * yields a separate credential. Pass an existing `SignerCredential` to
+   * keep it (`options` ignored).
    */
   static from(
     input?: SignerCredentialInput | SignerCredential,

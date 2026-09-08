@@ -65,7 +65,7 @@ Mint the bearer the same way Console does (`mintUserSignerToken` via
 `@pymthouse/builder-sdk` + app signer routing). Do **not** point this package
 at `signer.daydream.live`.
 
-`callRunner`, `discoverRunners`, `reserveSession`, `callSession`, and `stopSession` are also exported for callers who want to drive the pieces directly.
+`callRunner`, `discoverRunners`, `reserveSession`, `callSession`, and `stopSession` are also exported for callers who want to drive the pieces directly. Pass the same provider function (or one `SignerCredential` instance) into those APIs so the signer-info cache can hit. `SignerCredential.from(fn, { skewMs })` interns by function identity and skew — a later `from()` of that pair reuses the instance; a different skew yields a separate credential.
 
 ## Smoke
 
