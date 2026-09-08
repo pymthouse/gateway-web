@@ -1,6 +1,32 @@
 import { describe, expect, it, vi } from "vitest";
 import { SignerCredential } from "../src/signer-credential.js";
-import type { HeadersMap } from "../src/types.js";
+import type { HeadersMap, SignerCredentialProviderResult } from "../src/types.js";
+
+const CLOCK_START = new Date("2026-01-01T00:00:00Z");
+
+async function withFrozenClock(run: () => Promise<void>): Promise<void> {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(CLOCK_START);
+    await run();
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+function countingTtlCredential(
+  material: (n: number) => SignerCredentialProviderResult,
+): { cred: SignerCredential; calls: () => number } {
+  let n = 0;
+  const cred = SignerCredential.from(
+    () => {
+      n += 1;
+      return material(n);
+    },
+    { skewMs: 30_000 },
+  );
+  return { cred, calls: () => n };
+}
 
 describe("SignerCredential", () => {
   it("static bag never invokes a provider and returns identical headers", async () => {
@@ -69,74 +95,44 @@ describe("SignerCredential", () => {
   });
 
   it("re-invokes the provider once the skew window opens", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    try {
-      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-      let calls = 0;
-      const cred = SignerCredential.from(
-        () => {
-          calls += 1;
-          return {
-            headers: { Authorization: `Bearer t${calls}` },
-            expiresInSeconds: 90,
-          };
-        },
-        { skewMs: 30_000 },
-      );
+    const { cred, calls } = countingTtlCredential((n) => ({
+      headers: { Authorization: `Bearer t${n}` },
+      expiresInSeconds: 90,
+    }));
+    await withFrozenClock(async () => {
       expect(await cred.headers()).toEqual({ Authorization: "Bearer t1" });
       vi.setSystemTime(new Date("2026-01-01T00:00:59Z"));
       expect(await cred.headers()).toEqual({ Authorization: "Bearer t1" });
-      expect(calls).toBe(1);
+      expect(calls()).toBe(1);
       vi.setSystemTime(new Date("2026-01-01T00:01:00Z"));
       expect(await cred.headers()).toEqual({ Authorization: "Bearer t2" });
-      expect(calls).toBe(2);
-    } finally {
-      vi.useRealTimers();
-    }
+      expect(calls()).toBe(2);
+    });
   });
 
   it("flat Authorization + expiresInSeconds is TTL, not an HTTP header", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    try {
-      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-      let calls = 0;
-      const cred = SignerCredential.from(
-        () => {
-          calls += 1;
-          return { Authorization: `Bearer t${calls}`, expiresInSeconds: 90 };
-        },
-        { skewMs: 30_000 },
-      );
+    const { cred, calls } = countingTtlCredential((n) => ({
+      Authorization: `Bearer t${n}`,
+      expiresInSeconds: 90,
+    }));
+    await withFrozenClock(async () => {
       expect(await cred.headers()).toEqual({ Authorization: "Bearer t1" });
       vi.setSystemTime(new Date("2026-01-01T00:01:00Z"));
       expect(await cred.headers()).toEqual({ Authorization: "Bearer t2" });
-      expect(calls).toBe(2);
-    } finally {
-      vi.useRealTimers();
-    }
+      expect(calls()).toBe(2);
+    });
   });
 
   it("expiresInSeconds at or below the skew window refreshes on the next headers() call", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    try {
-      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-      let calls = 0;
-      const cred = SignerCredential.from(
-        () => {
-          calls += 1;
-          return {
-            headers: { Authorization: `Bearer t${calls}` },
-            expiresInSeconds: 30,
-          };
-        },
-        { skewMs: 30_000 },
-      );
+    const { cred, calls } = countingTtlCredential((n) => ({
+      headers: { Authorization: `Bearer t${n}` },
+      expiresInSeconds: 30,
+    }));
+    await withFrozenClock(async () => {
       expect(await cred.headers()).toEqual({ Authorization: "Bearer t1" });
       expect(await cred.headers()).toEqual({ Authorization: "Bearer t2" });
-      expect(calls).toBe(2);
-    } finally {
-      vi.useRealTimers();
-    }
+      expect(calls()).toBe(2);
+    });
   });
 
   it("invalidate during an in-flight refresh leaves the credential stale", async () => {
