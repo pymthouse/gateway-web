@@ -1,4 +1,4 @@
-import { LivepeerGatewayError, LivepeerHTTPError } from "./errors.js";
+import { isUnauthorizedHttpError, LivepeerGatewayError } from "./errors.js";
 import { getJson, parseHttpUrl } from "./http.js";
 import { extractMediaUrl } from "./media-url.js";
 
@@ -160,10 +160,6 @@ function deriveResponseUrl(handle: QueueHandle): string | null {
   } catch {
     return null;
   }
-}
-
-function isAuthFailure(error: unknown): boolean {
-  return error instanceof LivepeerHTTPError && (error.status === 401 || error.status === 403);
 }
 
 function asJsonObject(value: unknown, stage: string): Record<string, unknown> {
@@ -332,7 +328,7 @@ export async function awaitQueuedResult(
       runnerUrl: options.runnerUrl,
     });
   } catch (error) {
-    if (isAuthFailure(error)) return data;
+    if (isUnauthorizedHttpError(error)) return data;
     rethrowJobFailure(error);
     return data;
   }

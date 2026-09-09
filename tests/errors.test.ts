@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { LivepeerHTTPError, NoRunnerAvailableError, SignerRefreshRequired } from "../src/errors.js";
+import {
+  LivepeerHTTPError,
+  NoRunnerAvailableError,
+  SignerRefreshRequired,
+  isUnauthorizedHttpError,
+} from "../src/errors.js";
 import { extractErrorMessageFromBody, raiseHttpJsonError } from "../src/http.js";
 
 describe("errors", () => {
@@ -29,6 +34,13 @@ describe("errors", () => {
       expect((e as SignerRefreshRequired).orchestratorUrl).toBe("https://orch");
     }
     expect(() => raiseHttpJsonError(482, "http://s")).toThrow(/skip payment cycle/);
+  });
+
+  it("isUnauthorizedHttpError is 401 or 403 only", () => {
+    expect(isUnauthorizedHttpError(new LivepeerHTTPError(401, "http://s"))).toBe(true);
+    expect(isUnauthorizedHttpError(new LivepeerHTTPError(403, "http://s"))).toBe(true);
+    expect(isUnauthorizedHttpError(new LivepeerHTTPError(480, "http://s"))).toBe(false);
+    expect(isUnauthorizedHttpError(new Error("nope"))).toBe(false);
   });
 
   it("extractErrorMessageFromBody prefers error.message", () => {

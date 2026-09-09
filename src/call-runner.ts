@@ -1,5 +1,6 @@
 import { LivepeerGatewayError, LivepeerHTTPError, SignerRefreshRequired } from "./errors.js";
 import { isJsonContentType, parseRunnerJsonBody, requestBody } from "./http.js";
+import { SignerCredential } from "./signer-credential.js";
 import { getSignerInfo, LivePaymentSession } from "./signer.js";
 import type {
   GetPaymentResponse,
@@ -7,6 +8,7 @@ import type {
   LivePaymentChallenge,
   LiveRunnerInstance,
   LiveRunnerPriceInfo,
+  SignerCredentialInput,
 } from "./types.js";
 
 const LIVE_RUNNER_PAYER_ADDRESS_HEADER = "Livepeer-Payer-Address";
@@ -38,7 +40,7 @@ export interface CallRunnerOptions {
   payload?: Record<string, unknown>;
   method?: string;
   signerUrl?: string | null;
-  signerHeaders?: HeadersMap;
+  signerHeaders?: SignerCredentialInput | SignerCredential;
   paymentUnit?: string | null;
   timeoutMs?: number;
   maxPaymentChallengeRetries?: number;
@@ -123,7 +125,7 @@ async function getRunnerPayment(options: {
   challenge: LivePaymentChallenge;
   paymentType: string;
   signerUrl: string;
-  signerHeaders: HeadersMap | undefined;
+  credential: SignerCredential;
   maxPrice: LiveRunnerPriceInfo | null;
   app: string | null;
   gatewayRequestId: string | null;
@@ -131,7 +133,7 @@ async function getRunnerPayment(options: {
 }): Promise<{ session: LivePaymentSession; payment: GetPaymentResponse }> {
   const session = new LivePaymentSession({
     signerUrl: options.signerUrl,
-    signerHeaders: options.signerHeaders,
+    signerHeaders: options.credential,
     type: options.paymentType,
     challenge: options.challenge,
     app: options.app,
@@ -153,7 +155,7 @@ async function resolveChallengePayment(options: {
   challenge: LivePaymentChallenge;
   paymentType: string;
   signerUrl: string;
-  signerHeaders: HeadersMap | undefined;
+  credential: SignerCredential;
   maxPrice: LiveRunnerPriceInfo | null;
   app: string | null;
   requestHeaders: HeadersMap;
@@ -164,7 +166,7 @@ async function resolveChallengePayment(options: {
     challenge: options.challenge,
     paymentType: options.paymentType,
     signerUrl: options.signerUrl,
-    signerHeaders: options.signerHeaders,
+    credential: options.credential,
     maxPrice: options.maxPrice,
     app: options.app,
     gatewayRequestId: options.gatewayRequestId,
@@ -191,7 +193,7 @@ interface PaidAttemptInput {
   runnerUrl: string;
   requestPayload: Record<string, unknown>;
   signerUrl: string | null;
-  signerHeaders: HeadersMap | undefined;
+  credential: SignerCredential;
   paymentType: string;
   maxPrice: LiveRunnerPriceInfo | null;
   payerAddress: string;
@@ -250,7 +252,7 @@ async function attemptPaidCall(input: PaidAttemptInput): Promise<PaidAttemptResu
         challenge: input.challenge,
         paymentType: input.paymentType,
         signerUrl: input.signerUrl ?? "",
-        signerHeaders: input.signerHeaders,
+        credential: input.credential,
         maxPrice: input.maxPrice,
         app: input.runner?.app ?? null,
         requestHeaders,
@@ -262,6 +264,7 @@ async function attemptPaidCall(input: PaidAttemptInput): Promise<PaidAttemptResu
       needsOngoingFunding = paid.needsOngoingFunding;
     } catch (e) {
       if (!(e instanceof SignerRefreshRequired) || input.lastAttempt) throw e;
+      input.credential.invalidate();
       return { kind: "retry", challenge: null };
     }
   }
@@ -293,9 +296,10 @@ export async function callRunner(options: CallRunnerOptions): Promise<LiveRunner
     throw new LivepeerGatewayError("Live runner call requires runnerUrl");
   }
   const signerUrl = options.signerUrl ?? null;
+  const credential = SignerCredential.from(options.signerHeaders);
   let payerAddress = "";
   if (signerUrl) {
-    const signer = await getSignerInfo(signerUrl, options.signerHeaders);
+    const signer = await getSignerInfo(signerUrl, credential);
     payerAddress = signer.address ?? "";
   }
 
@@ -308,7 +312,7 @@ export async function callRunner(options: CallRunnerOptions): Promise<LiveRunner
       runnerUrl,
       requestPayload: options.payload ?? {},
       signerUrl,
-      signerHeaders: options.signerHeaders,
+      credential,
       paymentType: signerUrl ? runnerPaymentType(options.runner, options.paymentUnit) : "",
       maxPrice:
         signerUrl && options.runner?.priceInfo ? padRunnerPrice(options.runner.priceInfo) : null,

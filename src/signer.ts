@@ -7,24 +7,17 @@ import {
   SkipPaymentCycle,
 } from "./errors.js";
 import { httpOrigin, postEmpty, postJson } from "./http.js";
+import { sendWithSignerHeaders, SignerCredential } from "./signer-credential.js";
 import { stripTrailingSlashes } from "./strings.js";
 import type {
   GetPaymentResponse,
-  HeadersMap,
   LivePaymentChallenge,
   LiveRunnerPriceInfo,
+  SignerCredentialInput,
   SignerMaterial,
 } from "./types.js";
 
 export const PAYMENT_INTERVAL_MS = 3_000;
-
-function freezeHeaders(headers: HeadersMap | undefined): string {
-  if (!headers) return "";
-  return Object.entries(headers)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${k}=${v}`)
-    .join("\n");
-}
 
 const signerInfoCache = new Map<string, Promise<SignerMaterial>>();
 
@@ -54,24 +47,27 @@ function signerMaterialFromJson(data: Record<string, unknown>, signerUrl: string
 
 export async function getSignerInfo(
   signerUrl: string,
-  signerHeaders?: HeadersMap,
+  signerHeaders?: SignerCredentialInput | SignerCredential,
 ): Promise<SignerMaterial> {
   if (!signerUrl) return { address: null, sig: null };
-  const key = `${httpOrigin(signerUrl)}\0${freezeHeaders(signerHeaders)}`;
+  const credential = SignerCredential.from(signerHeaders);
+  const key = `${httpOrigin(signerUrl)}\0${credential.key}`;
   const cached = signerInfoCache.get(key);
   if (cached) return cached;
 
   const pending = (async () => {
     const url = `${httpOrigin(signerUrl)}/sign-orchestrator-info`;
     try {
-      const data = await postJson(
-        url,
-        {},
-        {
-          headers: signerHeaders,
-          timeoutMs: 5_000,
-          insecureTls: false,
-        },
+      const data = await sendWithSignerHeaders(credential, (headers) =>
+        postJson(
+          url,
+          {},
+          {
+            headers,
+            timeoutMs: 5_000,
+            insecureTls: false,
+          },
+        ),
       );
       return signerMaterialFromJson(data, url);
     } catch (e) {
@@ -97,7 +93,7 @@ export function clearSignerInfoCache(): void {
 
 export interface LivePaymentSessionOptions {
   signerUrl: string | null;
-  signerHeaders?: HeadersMap;
+  signerHeaders?: SignerCredentialInput | SignerCredential;
   type: string;
   challenge: LivePaymentChallenge;
   app?: string | null;
@@ -128,7 +124,7 @@ export interface PaymentSessionSnapshot {
 
 export class LivePaymentSession {
   private readonly signerUrl: string | null;
-  private readonly signerHeaders: HeadersMap | undefined;
+  private readonly credential: SignerCredential;
   private readonly type: string;
   private challenge: LivePaymentChallenge;
   private readonly app: string | null;
@@ -140,7 +136,7 @@ export class LivePaymentSession {
 
   constructor(options: LivePaymentSessionOptions) {
     this.signerUrl = options.signerUrl;
-    this.signerHeaders = options.signerHeaders;
+    this.credential = SignerCredential.from(options.signerHeaders);
     this.type = options.type;
     this.challenge = options.challenge;
     this.app = options.app ?? null;
@@ -176,7 +172,7 @@ export class LivePaymentSession {
 
   static fromSnapshot(options: {
     signerUrl: string | null;
-    signerHeaders?: HeadersMap;
+    signerHeaders?: SignerCredentialInput | SignerCredential;
     snapshot: PaymentSessionSnapshot;
     maxRefreshRetries?: number;
   }): LivePaymentSession {
@@ -202,6 +198,7 @@ export class LivePaymentSession {
         return await this.paymentRequest();
       } catch (e) {
         if (!(e instanceof SignerRefreshRequired)) throw e;
+        this.credential.invalidate();
         if (attempts >= this.maxRefreshRetries) {
           throw new PaymentError(`Signer refresh required after ${attempts} retries: ${e.message}`);
         }
@@ -279,11 +276,13 @@ export class LivePaymentSession {
     if (this.gatewayRequestId) payload.gatewayRequestId = this.gatewayRequestId;
     if (this.attributionSource) payload.attributionSource = this.attributionSource;
 
-    const data = await postJson(url, payload, {
-      headers: this.signerHeaders,
-      timeoutMs: 15_000,
-      insecureTls: false,
-    });
+    const data = await sendWithSignerHeaders(this.credential, (headers) =>
+      postJson(url, payload, {
+        headers,
+        timeoutMs: 15_000,
+        insecureTls: false,
+      }),
+    );
 
     const payment = data.payment;
     if (typeof payment !== "string" || !payment) {
@@ -307,7 +306,7 @@ export class LivePaymentSession {
   }
 
   private async refreshPaymentParams(): Promise<void> {
-    const signer = await getSignerInfo(this.signerUrl ?? "", this.signerHeaders);
+    const signer = await getSignerInfo(this.signerUrl ?? "", this.credential);
     if (!signer.address) {
       throw new PaymentError("Cannot refresh payment without signer address");
     }

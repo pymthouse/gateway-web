@@ -32,6 +32,12 @@ import { createGateway } from "@pymthouse/gateway-web";
 const gw = createGateway({
   signerUrl: "https://signer.pymthouse.com",
   signerHeaders: { Authorization: `Bearer ${process.env.PYMTHOUSE_API_KEY}` },
+  // Or a provider that rotates before expiry / after HTTP 401, 403, or 480:
+  // signerHeaders: async () => {
+  //   const session = await resolveSignerSession();
+  //   return { headers: { Authorization: `Bearer ${session.access_token}` }, expiresInSeconds: session.expires_in };
+  //   // A flat { Authorization, expiresInSeconds } bag is also accepted.
+  // },
   // discoveryUrl defaults to `${signerUrl}/discover-orchestrators`
   insecureTls: true, // runner + discovery only; signer stays verified
   timeoutMs: 600_000,
@@ -59,7 +65,7 @@ Mint the bearer the same way Console does (`mintUserSignerToken` via
 `@pymthouse/builder-sdk` + app signer routing). Do **not** point this package
 at `signer.daydream.live`.
 
-`callRunner`, `discoverRunners`, `reserveSession`, `callSession`, and `stopSession` are also exported for callers who want to drive the pieces directly.
+`callRunner`, `discoverRunners`, `reserveSession`, `callSession`, and `stopSession` are also exported for callers who want to drive the pieces directly. Pass the same provider function (or one `SignerCredential` instance) into those APIs so the signer-info cache can hit. `SignerCredential.from(fn, { skewMs })` interns by function identity and skew — a later `from()` of that pair reuses the instance; a different skew yields a separate credential.
 
 ## Smoke
 

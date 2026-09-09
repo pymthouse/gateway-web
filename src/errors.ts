@@ -31,6 +31,10 @@ export class LivepeerHTTPError extends LivepeerGatewayError {
   }
 }
 
+export function isUnauthorizedHttpError(error: unknown): boolean {
+  return error instanceof LivepeerHTTPError && (error.status === 401 || error.status === 403);
+}
+
 export function attachProviderRequestId(error: unknown, providerRequestId: string | null): void {
   if (!providerRequestId || !(error instanceof LivepeerGatewayError)) return;
   if (error.providerRequestId) return;

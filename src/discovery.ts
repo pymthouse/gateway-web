@@ -1,6 +1,7 @@
 import { LivepeerGatewayError, RemoteSignerError } from "./errors.js";
 import { getJson, httpOrigin, parseHttpUrl } from "./http.js";
-import type { DiscoveryEntry, FilterValue, HeadersMap } from "./types.js";
+import { sendWithSignerHeaders, SignerCredential } from "./signer-credential.js";
+import type { DiscoveryEntry, FilterValue, HeadersMap, SignerCredentialInput } from "./types.js";
 
 function normalizeFilterValues(value: FilterValue | undefined): string[] {
   if (value === undefined) return [];
@@ -94,7 +95,7 @@ function filterRunnerDiscoveryEntries(
 
 export interface DiscoverRunnersOptions {
   signerUrl?: string;
-  signerHeaders?: HeadersMap;
+  signerHeaders?: SignerCredentialInput | SignerCredential;
   discoveryUrl?: string;
   discoveryHeaders?: HeadersMap;
   app?: FilterValue;
@@ -110,13 +111,18 @@ export function defaultDiscoveryUrl(signerUrl: string): string {
 
 export async function discoverRunners(options: DiscoverRunnersOptions): Promise<DiscoveryEntry[]> {
   let discoveryEndpoint: string;
-  let requestHeaders: HeadersMap | undefined;
+  let staticHeaders: HeadersMap | undefined;
+  let credential: SignerCredential | undefined;
   if (options.discoveryUrl) {
     discoveryEndpoint = parseHttpUrl(options.discoveryUrl).toString();
-    requestHeaders = options.discoveryHeaders;
+    if (options.discoveryHeaders !== undefined) {
+      staticHeaders = options.discoveryHeaders;
+    } else if (options.signerHeaders !== undefined) {
+      credential = SignerCredential.from(options.signerHeaders);
+    }
   } else if (options.signerUrl) {
     discoveryEndpoint = defaultDiscoveryUrl(options.signerUrl);
-    requestHeaders = options.signerHeaders;
+    credential = SignerCredential.from(options.signerHeaders);
   } else {
     throw new LivepeerGatewayError("discoverRunners requires discoveryUrl or signerUrl");
   }
@@ -125,13 +131,19 @@ export async function discoverRunners(options: DiscoverRunnersOptions): Promise<
   const gpuFilters = normalizeFilterValues(options.gpu);
   discoveryEndpoint = appendRunnerFilters(discoveryEndpoint, options.app, options.gpu);
 
-  let data: unknown;
-  try {
-    data = await getJson(discoveryEndpoint, {
-      headers: requestHeaders,
+  const fetchDiscovery = (headers: HeadersMap | undefined) =>
+    getJson(discoveryEndpoint, {
+      headers,
       timeoutMs: options.timeoutMs ?? 15_000,
       insecureTls: options.insecureTls === true,
     });
+
+  let data: unknown;
+  try {
+    data =
+      credential !== undefined
+        ? await sendWithSignerHeaders(credential, fetchDiscovery)
+        : await fetchDiscovery(staticHeaders);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     throw new RemoteSignerError(discoveryEndpoint, msg, e);
