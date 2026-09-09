@@ -15,7 +15,10 @@ export interface SignerCredentialOptions {
 
 let nextProviderId = 1;
 
-const providerCredentials = new WeakMap<SignerCredentialProvider, SignerCredential>();
+const providerCredentials = new WeakMap<
+  SignerCredentialProvider,
+  Map<number, SignerCredential>
+>();
 
 export function freezeHeaders(headers: HeadersMap | undefined): string {
   if (!headers) return "";
@@ -82,6 +85,11 @@ export class SignerCredential {
     this.skewMs = options.skewMs;
   }
 
+  /**
+   * Interns a provider function by identity and `skewMs`. The first
+   * `from(fn, { skewMs })` for that pair is reused; a different skew
+   * yields a separate credential.
+   */
   static from(
     input?: SignerCredentialInput | SignerCredential,
     options?: SignerCredentialOptions,
@@ -89,14 +97,19 @@ export class SignerCredential {
     if (input instanceof SignerCredential) return input;
     const skewMs = Math.max(0, options?.skewMs ?? DEFAULT_SIGNER_REFRESH_SKEW_MS);
     if (typeof input === "function") {
-      const existing = providerCredentials.get(input);
+      let bySkew = providerCredentials.get(input);
+      if (!bySkew) {
+        bySkew = new Map();
+        providerCredentials.set(input, bySkew);
+      }
+      const existing = bySkew.get(skewMs);
       if (existing) return existing;
       const created = new SignerCredential({
         key: `provider:${nextProviderId++}`,
         provider: input,
         skewMs,
       });
-      providerCredentials.set(input, created);
+      bySkew.set(skewMs, created);
       return created;
     }
     const headers = input ? copyHeaders(input) : undefined;

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { SignerCredential } from "../src/signer-credential.js";
+import { DEFAULT_SIGNER_REFRESH_SKEW_MS, SignerCredential } from "../src/signer-credential.js";
 import type { HeadersMap, SignerCredentialProviderResult } from "../src/types.js";
 
 const CLOCK_START = new Date("2026-01-01T00:00:00Z");
@@ -44,9 +44,16 @@ describe("SignerCredential", () => {
     expect(SignerCredential.from(cred)).toBe(cred);
   });
 
-  it("from() reuses the credential for the same provider function", () => {
+  it("from() reuses the credential for the same provider function and skew", () => {
     const provider = () => ({ Authorization: "Bearer k" });
-    expect(SignerCredential.from(provider)).toBe(SignerCredential.from(provider));
+    const defaultSkew = SignerCredential.from(provider);
+    expect(SignerCredential.from(provider)).toBe(defaultSkew);
+    expect(SignerCredential.from(provider, { skewMs: DEFAULT_SIGNER_REFRESH_SKEW_MS })).toBe(
+      defaultSkew,
+    );
+    const tighter = SignerCredential.from(provider, { skewMs: 5_000 });
+    expect(tighter).not.toBe(defaultSkew);
+    expect(SignerCredential.from(provider, { skewMs: 5_000 })).toBe(tighter);
   });
 
   it("provider returning a bare HeadersMap is called once and never proactively refreshed", async () => {

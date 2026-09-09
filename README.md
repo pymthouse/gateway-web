@@ -32,7 +32,7 @@ import { createGateway } from "@pymthouse/gateway-web";
 const gw = createGateway({
   signerUrl: "https://signer.pymthouse.com",
   signerHeaders: { Authorization: `Bearer ${process.env.PYMTHOUSE_API_KEY}` },
-  // Or a provider that rotates before expiry / after HTTP 401 or 480:
+  // Or a provider that rotates before expiry / after HTTP 401, 403, or 480:
   // signerHeaders: async () => {
   //   const session = await resolveSignerSession();
   //   return { headers: { Authorization: `Bearer ${session.access_token}` }, expiresInSeconds: session.expires_in };

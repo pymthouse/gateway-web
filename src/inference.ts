@@ -34,7 +34,7 @@ import type { LiveRunnerInstance, SignerCredentialInput } from "./types.js";
 
 export interface GatewayConfig {
   signerUrl: string;
-  signerHeaders?: SignerCredentialInput;
+  signerHeaders?: SignerCredentialInput | SignerCredential;
   discoveryUrl?: string;
   /**
    * Skip TLS verification for runner and discovery hosts (self-signed orch certs).
