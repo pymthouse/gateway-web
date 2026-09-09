@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { callRunner } from "./call-runner.js";
+import { billableUnitsFromData, callRunner } from "./call-runner.js";
 import { discoverRunners } from "./discovery.js";
 import { attachGatewayRequestId, LivepeerGatewayError, NoRunnerAvailableError } from "./errors.js";
 import { capabilityMediaKind, extractMediaUrl } from "./media-url.js";
@@ -95,6 +95,8 @@ export interface InferenceResult {
   providerRequestId: string | null;
   statusUrl: string | null;
   responseUrl: string | null;
+  /** Runner-reported usage receipt. Null when omitted or unparseable. */
+  billableUnits: number | null;
 }
 
 function lastAppSegment(app: string): string {
@@ -197,6 +199,7 @@ function buildInferenceResult(options: {
     providerRequestId: handle?.requestId ?? options.providerRequestId ?? null,
     statusUrl: url ? null : (handle?.statusUrl ?? null),
     responseUrl: url ? null : (handle?.responseUrl ?? null),
+    billableUnits: billableUnitsFromData(options.data),
   };
 }
 

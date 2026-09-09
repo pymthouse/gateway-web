@@ -36,7 +36,7 @@ export {
 
 export { isRetryableRunnerFailure, rejectionReason } from "./runner-failover.js";
 
-export { callRunner, runnerPaymentType, padRunnerPrice } from "./call-runner.js";
+export { callRunner, runnerPaymentType, padRunnerPrice, billableUnitsFromData } from "./call-runner.js";
 export type { CallRunnerOptions, LiveRunnerCallResult } from "./call-runner.js";
 
 export { createGateway } from "./inference.js";
