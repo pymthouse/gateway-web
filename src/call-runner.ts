@@ -30,6 +30,8 @@ export interface LiveRunnerCallResult {
   content: Buffer | null;
   contentType: string;
   providerRequestId: string | null;
+  /** Runner-reported usage receipt. Null when the body omitted or could not parse it. */
+  billableUnits: number | null;
 }
 
 export interface CallRunnerOptions {
@@ -213,6 +215,18 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+export function billableUnitsFromData(data: Record<string, unknown>): number | null {
+  const value = data.billable_units;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 function toPaidCallResult(
   input: PaidAttemptInput,
   sessionId: string,
@@ -232,6 +246,7 @@ function toPaidCallResult(
     content: isJson ? null : response.body,
     contentType: response.contentType,
     providerRequestId: response.providerRequestId ?? nonEmptyString(data.request_id),
+    billableUnits: isJson ? billableUnitsFromData(data) : null,
   };
 }
 

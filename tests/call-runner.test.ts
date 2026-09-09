@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { callRunner, padRunnerPrice, runnerPaymentType } from "../src/call-runner.js";
+import {
+  billableUnitsFromData,
+  callRunner,
+  padRunnerPrice,
+  runnerPaymentType,
+} from "../src/call-runner.js";
 import { LivepeerGatewayError, LivepeerHTTPError } from "../src/errors.js";
 import { clearSignerInfoCache } from "../src/signer.js";
 import type { LiveRunnerInstance } from "../src/types.js";
@@ -86,6 +91,7 @@ describe("callRunner", () => {
       });
       expect(result.data.url).toBe("https://cdn.example/out.jpg");
       expect(result.sessionId).toBe("man-9");
+      expect(result.billableUnits).toBeNull();
       expect(generateHits).toBe(2);
     } finally {
       clearSignerInfoCache();
@@ -141,6 +147,39 @@ describe("callRunner", () => {
       clearSignerInfoCache();
       await server.close();
     }
+  });
+
+  it("surfaces billable_units from the runner JSON body", async () => {
+    const server = await startMockServer((req, res) => {
+      if (req.pathname === "/app") {
+        json(res, 200, {
+          billable_units: 2.5,
+          output: { ok: true },
+          request_id: "req-1",
+        });
+        return;
+      }
+      json(res, 404, { error: { message: req.pathname } });
+    });
+    try {
+      const result = await callRunner({
+        runnerUrl: `${server.origin}/app`,
+        payload: { prompt: "x" },
+        timeoutMs: 5_000,
+      });
+      expect(result.billableUnits).toBe(2.5);
+      expect(result.data.billable_units).toBe(2.5);
+      expect(result.providerRequestId).toBe("req-1");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("treats a missing or unparseable billable_units field as null", () => {
+    expect(billableUnitsFromData({})).toBeNull();
+    expect(billableUnitsFromData({ billable_units: null })).toBeNull();
+    expect(billableUnitsFromData({ billable_units: "nope" })).toBeNull();
+    expect(billableUnitsFromData({ billable_units: 0 })).toBe(0);
   });
 
   it("402 without signerUrl is a gateway error", async () => {
