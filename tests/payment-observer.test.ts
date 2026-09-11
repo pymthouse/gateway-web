@@ -2,9 +2,44 @@ import { describe, expect, it } from "vitest";
 import { PaymentObserverError } from "../src/errors.js";
 import { createGateway } from "../src/inference.js";
 import { clearSignerInfoCache } from "../src/signer.js";
-import { json, startMockServer } from "./mock-server.js";
+import { json, startMockServer, type MockRequest } from "./mock-server.js";
 
 type RunnerMode = "single-shot" | "persistent";
+
+function handlePaidRunner(
+  req: MockRequest,
+  res: Parameters<typeof json>[0],
+  path: string,
+  failFirst: boolean,
+  order: string[],
+): boolean {
+  const match = /^\/apps\/(first|second)\/(app|session)$/.exec(path);
+  if (!match) return false;
+  const [, id, kind] = match;
+  if (!req.headers["livepeer-payment"]) {
+    json(res, 402, {
+      payment_params: "p",
+      manifest_id: "manifest-" + id,
+      payment_url: `${req.url.origin}/pay`,
+    });
+    return true;
+  }
+  order.push("provider:" + id);
+  if (failFirst && id === "first") {
+    json(res, 503, { error: "provider_failed" });
+    return true;
+  }
+  if (kind === "session") {
+    json(res, 200, {
+      session_id: "provider-session",
+      app_url: `${req.url.origin}/session-app`,
+      control_url: `${req.url.origin}/control`,
+    });
+    return true;
+  }
+  json(res, 200, { text: "ok", request_id: "provider" });
+  return true;
+}
 
 async function withPaidRunners(
   mode: RunnerMode,
@@ -49,46 +84,7 @@ async function withPaidRunners(
       json(res, 200, { payment: "PAY", segCreds: "SEG", state: {} });
       return;
     }
-    if (path === "/apps/first/app" || path === "/apps/second/app") {
-      const id = path.includes("first") ? "first" : "second";
-      if (!req.headers["livepeer-payment"]) {
-        json(res, 402, {
-          payment_params: "p",
-          manifest_id: "manifest-" + id,
-          payment_url: `${req.url.origin}/pay`,
-        });
-        return;
-      }
-      order.push("provider:" + id);
-      if (failFirst && id === "first") {
-        json(res, 503, { error: "provider_failed" });
-        return;
-      }
-      json(res, 200, { text: "ok", request_id: "provider" });
-      return;
-    }
-    if (path === "/apps/first/session" || path === "/apps/second/session") {
-      const id = path.includes("first") ? "first" : "second";
-      if (!req.headers["livepeer-payment"]) {
-        json(res, 402, {
-          payment_params: "p",
-          manifest_id: "manifest-" + id,
-          payment_url: `${req.url.origin}/pay`,
-        });
-        return;
-      }
-      order.push("provider:" + id);
-      if (failFirst && id === "first") {
-        json(res, 503, { error: "provider_failed" });
-        return;
-      }
-      json(res, 200, {
-        session_id: "provider-session",
-        app_url: `${req.url.origin}/session-app`,
-        control_url: `${req.url.origin}/control`,
-      });
-      return;
-    }
+    if (handlePaidRunner(req, res, path, failFirst, order)) return;
     if (path === "/session-app/hello") {
       json(res, 200, { text: "ok" });
       return;

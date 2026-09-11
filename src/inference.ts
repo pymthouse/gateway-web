@@ -106,6 +106,12 @@ function lastAppSegment(app: string): string {
   return slash >= 0 ? app.slice(slash + 1) : app;
 }
 
+function imageSizePart(value: unknown, fallback: number): number | string {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) return value.trim();
+  return fallback;
+}
+
 function rejectSingleShotEndpoint(endpoint?: string): void {
   if (endpoint?.trim()) {
     throw new LivepeerGatewayError(
@@ -168,7 +174,7 @@ function buildPayload(req: InferenceRequest): Record<string, unknown> {
   const isImageGen =
     appHint.startsWith("image-generation/") || appHint.includes("/image-generation/");
   if (isImageGen && payload.size == null && (payload.width != null || payload.height != null)) {
-    payload.size = `${payload.width ?? 1024}x${payload.height ?? 1024}`;
+    payload.size = `${imageSizePart(payload.width, 1024)}x${imageSizePart(payload.height, 1024)}`;
   }
   return payload;
 }
