@@ -82,6 +82,17 @@ export class PaymentError extends LivepeerGatewayError {
   }
 }
 
+/** Callback failure from `onPayment`. Never retryable — must not trigger another charge. */
+export class PaymentObserverError extends LivepeerGatewayError {
+  override readonly cause: unknown;
+
+  constructor(message: string, cause: unknown = null) {
+    super(message);
+    this.name = "PaymentObserverError";
+    this.cause = cause;
+  }
+}
+
 export class RemoteSignerError extends LivepeerGatewayError {
   readonly signerUrl: string;
   override readonly cause: unknown;

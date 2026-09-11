@@ -29,7 +29,7 @@ import {
   type CallSessionResult,
   type RunnerSession,
 } from "./session.js";
-import type { HeadersMap, LiveRunnerInstance } from "./types.js";
+import type { HeadersMap, LiveRunnerInstance, PaymentObserver } from "./types.js";
 
 export interface GatewayConfig {
   signerUrl: string;
@@ -74,6 +74,8 @@ export interface InferenceRequest {
   gatewayRequestId?: string;
   /** Fired while a fal queue receipt is polled to completion. */
   onProgress?: (info: QueueProgress) => void | Promise<void>;
+  /** Awaited before payment and after acceptance; failures abort without paid failover. */
+  onPayment?: PaymentObserver;
 }
 
 export interface InferenceResult {
@@ -211,6 +213,8 @@ export interface ReserveSessionRequest {
   startFunding?: boolean;
   /** Job id to attribute this session's tickets to. Generated when omitted. */
   gatewayRequestId?: string;
+  /** Awaited before payment and after acceptance; failures abort without paid failover. */
+  onPayment?: PaymentObserver;
 }
 
 export interface CallSessionRequest {
@@ -297,6 +301,7 @@ export function createGateway(config: GatewayConfig): Gateway {
       insecureTls,
       gatewayRequestId,
       attributionSource: config.attributionSource ?? null,
+      onPayment: req.onPayment,
     });
     return { runnerUrl, data: result.data, providerRequestId: result.providerRequestId };
   }
@@ -318,6 +323,7 @@ export function createGateway(config: GatewayConfig): Gateway {
       insecureTls,
       gatewayRequestId,
       attributionSource: config.attributionSource ?? null,
+      onPayment: req.onPayment,
     });
     try {
       const result = await callRunnerSession(session, {
@@ -457,6 +463,7 @@ export function createGateway(config: GatewayConfig): Gateway {
               startFunding: req.startFunding,
               gatewayRequestId,
               attributionSource: config.attributionSource ?? null,
+              onPayment: req.onPayment,
             });
           } catch (e) {
             lastError = e;

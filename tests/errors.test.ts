@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { LivepeerHTTPError, NoRunnerAvailableError, SignerRefreshRequired } from "../src/errors.js";
+import {
+  LivepeerHTTPError,
+  NoRunnerAvailableError,
+  PaymentObserverError,
+  SignerRefreshRequired,
+} from "../src/errors.js";
 import { extractErrorMessageFromBody, raiseHttpJsonError } from "../src/http.js";
 
 describe("errors", () => {
@@ -34,5 +39,14 @@ describe("errors", () => {
   it("extractErrorMessageFromBody prefers error.message", () => {
     expect(extractErrorMessageFromBody('{"error":{"message":"nope"}}')).toBe("nope");
     expect(extractErrorMessageFromBody("plain")).toBe("plain");
+  });
+
+  it("PaymentObserverError preserves cause and stays a gateway error", () => {
+    const cause = new Error("db unavailable");
+    const err = new PaymentObserverError("payment_manifest_persistence_failed", cause);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe("PaymentObserverError");
+    expect(err.cause).toBe(cause);
+    expect(err.message).toBe("payment_manifest_persistence_failed");
   });
 });
