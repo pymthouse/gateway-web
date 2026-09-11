@@ -29,7 +29,7 @@ import {
   type CallSessionResult,
   type RunnerSession,
 } from "./session.js";
-import type { HeadersMap, LiveRunnerInstance } from "./types.js";
+import type { HeadersMap, LiveRunnerInstance, PaymentObserver } from "./types.js";
 
 export interface GatewayConfig {
   signerUrl: string;
@@ -74,6 +74,8 @@ export interface InferenceRequest {
   gatewayRequestId?: string;
   /** Fired while a fal queue receipt is polled to completion. */
   onProgress?: (info: QueueProgress) => void | Promise<void>;
+  /** Awaited before payment and after acceptance; failures abort without paid failover. */
+  onPayment?: PaymentObserver;
 }
 
 export interface InferenceResult {
@@ -102,6 +104,12 @@ export interface InferenceResult {
 function lastAppSegment(app: string): string {
   const slash = app.lastIndexOf("/");
   return slash >= 0 ? app.slice(slash + 1) : app;
+}
+
+function imageSizePart(value: unknown, fallback: number): number | string {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) return value.trim();
+  return fallback;
 }
 
 function rejectSingleShotEndpoint(endpoint?: string): void {
@@ -166,7 +174,7 @@ function buildPayload(req: InferenceRequest): Record<string, unknown> {
   const isImageGen =
     appHint.startsWith("image-generation/") || appHint.includes("/image-generation/");
   if (isImageGen && payload.size == null && (payload.width != null || payload.height != null)) {
-    payload.size = `${payload.width ?? 1024}x${payload.height ?? 1024}`;
+    payload.size = `${imageSizePart(payload.width, 1024)}x${imageSizePart(payload.height, 1024)}`;
   }
   return payload;
 }
@@ -211,6 +219,8 @@ export interface ReserveSessionRequest {
   startFunding?: boolean;
   /** Job id to attribute this session's tickets to. Generated when omitted. */
   gatewayRequestId?: string;
+  /** Awaited before payment and after acceptance; failures abort without paid failover. */
+  onPayment?: PaymentObserver;
 }
 
 export interface CallSessionRequest {
@@ -297,6 +307,7 @@ export function createGateway(config: GatewayConfig): Gateway {
       insecureTls,
       gatewayRequestId,
       attributionSource: config.attributionSource ?? null,
+      onPayment: req.onPayment,
     });
     return { runnerUrl, data: result.data, providerRequestId: result.providerRequestId };
   }
@@ -318,6 +329,7 @@ export function createGateway(config: GatewayConfig): Gateway {
       insecureTls,
       gatewayRequestId,
       attributionSource: config.attributionSource ?? null,
+      onPayment: req.onPayment,
     });
     try {
       const result = await callRunnerSession(session, {
@@ -457,6 +469,7 @@ export function createGateway(config: GatewayConfig): Gateway {
               startFunding: req.startFunding,
               gatewayRequestId,
               attributionSource: config.attributionSource ?? null,
+              onPayment: req.onPayment,
             });
           } catch (e) {
             lastError = e;

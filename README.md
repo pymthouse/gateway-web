@@ -10,6 +10,8 @@ Ports the dispatch path that the Python SDK service uses: discover runners, pick
 
 If the runner returns a fal **queue receipt** (`IN_QUEUE` / `status_url`, no media URL) instead of blocking until completion, `runInference` polls `status_url` then fetches `response_url` for the remaining timeout. Queue control URLs are never treated as media. A 401/403 on the poll URL leaves the handle on `result.data` / `statusUrl` so the caller can surface it. Pass `onProgress` for poll ticks.
 
+Pass `onPayment({ manifestId, phase })` on `runInference` / `reserveSession` to persist payment lineage before the signer charge (`prepared`) and after credentials return (`accepted`). The callback is per-request so concurrent callers stay isolated. It never receives payment bytes or signer state. Thrown errors abort without paid orchestrator failover.
+
 **Orchestrator failover:** for each capability the gateway caches up to **5 distinct orchestrators** (one runner per orch, merit-ranked). On retryable runner failures (5xx, timeouts, exhausted payment retries on that orch) it automatically tries the next cached orchestrator before giving up. Single-shot runners are tried first when an app is advertised under both modes.
 
 This package does **not** implement BYOC `/process/request/{cap}`, gRPC `GetOrchestrator`, protobuf, WebSocket, LV2V/trickle, or training. See [docs/stream-session-handoff.md](docs/stream-session-handoff.md) for the streaming-handoff spike.

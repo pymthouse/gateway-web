@@ -40,5 +40,17 @@ export interface SignerMaterial {
 
 export type HeadersMap = Record<string, string>;
 
+/** Awaited before the signer charge and after payment credentials are returned. */
+export type PaymentPhase = "prepared" | "accepted";
+
+/**
+ * Per-request payment observer. Failures abort without paid orchestrator failover.
+ * Receives only the challenge manifest id — never payment bytes or signer state.
+ */
+export type PaymentObserver = (payment: {
+  manifestId: string;
+  phase: PaymentPhase;
+}) => void | Promise<void>;
+
 /** Incoming HTTP header bag from undici (`string` or multi-value arrays). */
 export type HttpHeaderBag = Record<string, string | string[] | undefined>;

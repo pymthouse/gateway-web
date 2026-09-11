@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LivepeerGatewayError, LivepeerHTTPError } from "../src/errors.js";
+import { LivepeerGatewayError, LivepeerHTTPError, PaymentObserverError } from "../src/errors.js";
 import { isRetryableRunnerFailure } from "../src/runner-failover.js";
 
 describe("runner-failover", () => {
@@ -13,5 +13,16 @@ describe("runner-failover", () => {
         new LivepeerGatewayError("runner session response missing control_url"),
       ),
     ).toBe(true);
+  });
+
+  it("never retries payment observer failures", () => {
+    expect(
+      isRetryableRunnerFailure(new PaymentObserverError("payment_manifest_persistence_failed")),
+    ).toBe(false);
+    expect(
+      isRetryableRunnerFailure(
+        new PaymentObserverError("connection timeout", new LivepeerHTTPError(503, "http://x")),
+      ),
+    ).toBe(false);
   });
 });

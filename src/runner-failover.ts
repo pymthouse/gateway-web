@@ -1,9 +1,10 @@
-import { LivepeerGatewayError, LivepeerHTTPError } from "./errors.js";
+import { LivepeerGatewayError, LivepeerHTTPError, PaymentObserverError } from "./errors.js";
 
 const RETRYABLE_HTTP_STATUSES = new Set([404, 408, 429, 500, 502, 503, 504]);
 
 /** Whether `runInference` should try the next cached orchestrator. */
 export function isRetryableRunnerFailure(error: unknown): boolean {
+  if (error instanceof PaymentObserverError) return false;
   if (error instanceof LivepeerHTTPError) {
     return RETRYABLE_HTTP_STATUSES.has(error.status);
   }

@@ -8,7 +8,7 @@ import {
   requestBody,
 } from "./http.js";
 import type { LivePaymentSession } from "./signer.js";
-import type { HeadersMap, LiveRunnerInstance } from "./types.js";
+import type { HeadersMap, LiveRunnerInstance, PaymentObserver } from "./types.js";
 
 export interface RunnerSession {
   sessionId: string;
@@ -37,6 +37,8 @@ export interface ReserveSessionOptions {
   gatewayRequestId?: string | null;
   /** Which integration issued the call. The signer defaults to "direct_api". */
   attributionSource?: string | null;
+  /** Awaited before payment and after acceptance; failures abort without paid failover. */
+  onPayment?: PaymentObserver;
 }
 
 export interface CallSessionOptions {
@@ -83,6 +85,7 @@ export async function reserveSession(options: ReserveSessionOptions): Promise<Ru
     insecureTls: options.insecureTls,
     gatewayRequestId: options.gatewayRequestId,
     attributionSource: options.attributionSource,
+    onPayment: options.onPayment,
   });
 
   const sessionId = stringField(result.data, "session_id");

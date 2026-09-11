@@ -1,4 +1,9 @@
-import { LivepeerGatewayError, LivepeerHTTPError, SignerRefreshRequired } from "./errors.js";
+import {
+  LivepeerGatewayError,
+  LivepeerHTTPError,
+  PaymentObserverError,
+  SignerRefreshRequired,
+} from "./errors.js";
 import { isJsonContentType, parseRunnerJsonBody, requestBody } from "./http.js";
 import { getSignerInfo, LivePaymentSession } from "./signer.js";
 import type {
@@ -7,6 +12,8 @@ import type {
   LivePaymentChallenge,
   LiveRunnerInstance,
   LiveRunnerPriceInfo,
+  PaymentObserver,
+  PaymentPhase,
 } from "./types.js";
 
 const LIVE_RUNNER_PAYER_ADDRESS_HEADER = "Livepeer-Payer-Address";
@@ -50,6 +57,8 @@ export interface CallRunnerOptions {
   gatewayRequestId?: string | null;
   /** Which integration issued the call. The signer defaults to "direct_api". */
   attributionSource?: string | null;
+  /** Awaited before payment and after acceptance; failures abort without paid failover. */
+  onPayment?: PaymentObserver;
 }
 
 export function runnerPaymentType(
@@ -121,6 +130,23 @@ function parseRunnerPaymentChallenge(error: LivepeerHTTPError): LivePaymentChall
   };
 }
 
+async function observePayment(
+  onPayment: PaymentObserver | undefined,
+  manifestId: string,
+  phase: PaymentPhase,
+): Promise<void> {
+  if (!onPayment) return;
+  try {
+    await onPayment({
+      manifestId,
+      phase,
+    });
+  } catch (cause) {
+    if (cause instanceof PaymentObserverError) throw cause;
+    throw new PaymentObserverError("payment_manifest_persistence_failed", cause);
+  }
+}
+
 async function getRunnerPayment(options: {
   challenge: LivePaymentChallenge;
   paymentType: string;
@@ -130,6 +156,7 @@ async function getRunnerPayment(options: {
   app: string | null;
   gatewayRequestId: string | null;
   attributionSource: string | null;
+  onPayment?: PaymentObserver;
 }): Promise<{ session: LivePaymentSession; payment: GetPaymentResponse }> {
   const session = new LivePaymentSession({
     signerUrl: options.signerUrl,
@@ -141,6 +168,8 @@ async function getRunnerPayment(options: {
     gatewayRequestId: options.gatewayRequestId,
     attributionSource: options.attributionSource,
   });
+  // Persist the manifest before payment; callback failures must never trigger paid failover.
+  await observePayment(options.onPayment, options.challenge.manifestId, "prepared");
   const payment = await session.getPayment();
   if (!payment.payment) {
     throw new LivepeerGatewayError("Live runner payment response missing payment");
@@ -148,6 +177,7 @@ async function getRunnerPayment(options: {
   if (!payment.segCreds) {
     throw new LivepeerGatewayError("Live runner payment response missing segCreds");
   }
+  await observePayment(options.onPayment, options.challenge.manifestId, "accepted");
   return { session, payment };
 }
 
@@ -161,6 +191,7 @@ async function resolveChallengePayment(options: {
   requestHeaders: HeadersMap;
   gatewayRequestId: string | null;
   attributionSource: string | null;
+  onPayment?: PaymentObserver;
 }): Promise<{ session: LivePaymentSession; sessionId: string; needsOngoingFunding: boolean }> {
   const paid = await getRunnerPayment({
     challenge: options.challenge,
@@ -171,6 +202,7 @@ async function resolveChallengePayment(options: {
     app: options.app,
     gatewayRequestId: options.gatewayRequestId,
     attributionSource: options.attributionSource,
+    onPayment: options.onPayment,
   });
   options.requestHeaders["Livepeer-Payment"] = paid.payment.payment;
   options.requestHeaders["Livepeer-Segment"] = paid.payment.segCreds ?? "";
@@ -205,6 +237,7 @@ interface PaidAttemptInput {
   method: string;
   gatewayRequestId: string | null;
   attributionSource: string | null;
+  onPayment?: PaymentObserver;
 }
 
 type PaidAttemptResult =
@@ -271,6 +304,7 @@ async function attemptPaidCall(input: PaidAttemptInput): Promise<PaidAttemptResu
         requestHeaders,
         gatewayRequestId: input.gatewayRequestId,
         attributionSource: input.attributionSource,
+        onPayment: input.onPayment,
       });
       paymentSession = paid.session;
       sessionId = paid.sessionId;
@@ -336,6 +370,7 @@ export async function callRunner(options: CallRunnerOptions): Promise<LiveRunner
       method: options.method ?? "POST",
       gatewayRequestId: options.gatewayRequestId ?? null,
       attributionSource: options.attributionSource ?? null,
+      onPayment: options.onPayment,
     });
     if (outcome.kind === "success") return outcome.result;
     challenge = outcome.challenge;
